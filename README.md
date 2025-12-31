@@ -1,4 +1,4 @@
-![veAERO Optimizer Banner](./banner.svg)
+<img width="1036" height="256" alt="image" src="https://github.com/user-attachments/assets/48ba8a69-d58e-404c-ae7f-66e425e95d81" />
 
 # veAERO Yield Optimizer
 
