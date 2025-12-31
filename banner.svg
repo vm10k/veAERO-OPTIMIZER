@@ -1,0 +1,39 @@
+<svg width="800" height="200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse">
+      <path d="M 25 0 L 0 0 0 25" fill="none" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
+    </pattern>
+    <style>
+      .bg { fill: #3d4a49; }
+      .title { font-family: 'Courier New', monospace; font-weight: bold; font-size: 60px; fill: #ffdd65; text-shadow: 4px 4px 0px #000; }
+      .subtitle { font-family: 'Courier New', monospace; font-size: 24px; fill: #ffffff; background-color: #000; }
+      .border { fill: none; stroke: #000; stroke-width: 8px; }
+      .accent-green { fill: #00ff2a; }
+      .accent-red { fill: #ff4d4d; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" class="bg" />
+  <rect width="800" height="200" fill="url(#grid)" />
+  
+  <!-- Decorative Pixel Corners -->
+  <rect x="0" y="0" width="20" height="20" fill="#000" />
+  <rect x="780" y="0" width="20" height="20" fill="#000" />
+  <rect x="0" y="180" width="20" height="20" fill="#000" />
+  <rect x="780" y="180" width="20" height="20" fill="#000" />
+
+  <!-- Status Lights -->
+  <circle cx="750" cy="40" r="8" class="accent-green" stroke="#000" stroke-width="2"/>
+  <circle cx="725" cy="40" r="8" class="accent-red" stroke="#000" stroke-width="2"/>
+
+  <!-- Text -->
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" class="title">veAERO OPTIMIZER</text>
+  
+  <!-- Subtitle Box -->
+  <rect x="250" y="130" width="300" height="40" fill="#000" opacity="0.6" rx="5" />
+  <text x="50%" y="158" dominant-baseline="middle" text-anchor="middle" class="subtitle">YIELD MAXIMIZATION BOT</text>
+
+  <!-- Border -->
+  <rect x="4" y="4" width="792" height="192" class="border" />
+</svg>
