@@ -108,4 +108,4 @@ This tool is open-source and free to use. If it helps you maximize your yields, 
 
 ---
 
-*Disclaimer: This software is provided "as is", without warranty of any kind. Use at your own risk. Always verify transactions before signing.*
+*Disclaimer: This software is provided "as is", without warranty of any kind. Use at your own risk.*
