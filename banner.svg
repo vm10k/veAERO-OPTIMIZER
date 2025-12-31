@@ -1,81 +1,92 @@
 <svg width="850" height="250" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Grid Pattern for Background -->
+    <!-- Background Grid -->
     <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
       <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="2"/>
     </pattern>
     
-    <!-- Wood Texture Pattern -->
+    <!-- Wood Texture -->
     <pattern id="wood" width="100" height="20" patternUnits="userSpaceOnUse">
-      <rect width="100" height="20" fill="#8B5A00"/> <!-- Base Wood Color -->
-      <path d="M0 20 L100 20" stroke="#5C3A00" stroke-width="2"/> <!-- Plank lines -->
-      <path d="M0 0 L100 0" stroke="#A67C00" stroke-width="1" opacity="0.5"/> <!-- Highlight -->
+      <rect width="100" height="20" fill="#8B5A00"/>
+      <path d="M0 20 L100 20" stroke="#5C3A00" stroke-width="2"/>
+      <path d="M0 0 L100 0" stroke="#A67C00" stroke-width="1" opacity="0.5"/>
     </pattern>
 
-    <!-- Text Shadow Filter -->
+    <!-- Drop Shadow Filter -->
     <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="0"/>
-      <feOffset dx="4" dy="4" result="offsetblur"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="3" dy="3" result="offsetblur"/>
       <feComponentTransfer>
-        <feFuncA type="linear" slope="1"/>
+        <feFuncA type="linear" slope="0.5"/>
       </feComponentTransfer>
       <feMerge> 
         <feMergeNode in="offsetblur"/>
         <feMergeNode in="SourceGraphic"/> 
       </feMerge>
     </filter>
+
+    <!-- Gradient for Aero Logo -->
+    <linearGradient id="aeroGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#615cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#afa5ee;stop-opacity:1" />
+    </linearGradient>
   </defs>
 
-  <!-- Main Background (Dark Teal Grid) -->
+  <!-- Main Background -->
   <rect width="850" height="250" fill="#3d4a49" />
   <rect width="850" height="250" fill="url(#grid)" />
   
-  <!-- "Status" Light (Top Right) -->
+  <!-- Status Light -->
   <circle cx="820" cy="30" r="6" fill="#00ff2a" stroke="#000" stroke-width="2">
     <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite" />
   </circle>
   <text x="805" y="34" font-family="monospace" font-size="10" fill="#00ff2a" text-anchor="end">Connected</text>
 
-  <!-- THE MAIN PANEL (Wood Board) -->
+  <!-- MAIN WOOD PANEL -->
   <g transform="translate(40, 50)">
-    <!-- Shadow for Panel -->
+    <!-- Shadow -->
     <rect x="5" y="5" width="770" height="150" fill="rgba(0,0,0,0.6)" />
     
-    <!-- Wood Background -->
+    <!-- Wood Board -->
     <rect x="0" y="0" width="770" height="150" fill="url(#wood)" stroke="#000" stroke-width="4"/>
     
-    <!-- Inner Dark Border (The frame effect) -->
+    <!-- Inner Dark Frame -->
     <rect x="0" y="0" width="770" height="150" fill="none" stroke="#2d3837" stroke-width="12" />
     
-    <!-- Corner Decorations (Pixel Art Style) -->
-    <!-- Top Left -->
+    <!-- Corner Decorations -->
     <rect x="-4" y="-4" width="20" height="20" fill="#2d3837" stroke="#000" stroke-width="2"/>
     <rect x="4" y="4" width="8" height="8" fill="#5c7a78"/>
-    <!-- Top Right -->
+
     <rect x="754" y="-4" width="20" height="20" fill="#2d3837" stroke="#000" stroke-width="2"/>
     <rect x="758" y="4" width="8" height="8" fill="#5c7a78"/>
-    <!-- Bottom Left -->
+
     <rect x="-4" y="134" width="20" height="20" fill="#2d3837" stroke="#000" stroke-width="2"/>
     <rect x="4" y="138" width="8" height="8" fill="#5c7a78"/>
-    <!-- Bottom Right -->
+
     <rect x="754" y="134" width="20" height="20" fill="#2d3837" stroke="#000" stroke-width="2"/>
     <rect x="758" y="138" width="8" height="8" fill="#5c7a78"/>
 
-    <!-- LOGO CIRCLE (White Circle with simplified Aero streaks) -->
-    <circle cx="100" cy="75" r="50" fill="#eee" stroke="#000" stroke-width="4" filter="url(#dropShadow)"/>
-    <!-- Simplified Aero Streaks (Vector) -->
-    <path d="M70 90 Q 100 95 130 60" stroke="#0033cc" stroke-width="6" fill="none" />
-    <path d="M70 80 Q 95 85 125 55" stroke="#ff0000" stroke-width="5" fill="none" />
-    <path d="M75 70 Q 95 70 120 50" stroke="#001a66" stroke-width="4" fill="none" />
+    <!-- LOGO CONTAINER -->
+    <circle cx="110" cy="75" r="55" fill="#fff" stroke="#000" stroke-width="4" filter="url(#dropShadow)"/>
+    
+    <!-- AERO LOGO (Stylized Streaks) -->
+    <g transform="translate(68, 38) scale(0.85)">
+        <!-- Top Streak -->
+        <path d="M10 10 Q 50 5 90 20 L 80 35 Q 50 25 10 30 Z" fill="url(#aeroGradient)" />
+        <!-- Middle Streak -->
+        <path d="M10 40 Q 60 35 100 50 L 90 65 Q 50 55 10 60 Z" fill="#4d47e5" />
+        <!-- Bottom Streak -->
+        <path d="M10 70 Q 70 65 110 80 L 100 95 Q 60 85 10 90 Z" fill="#111827" />
+    </g>
 
-    <!-- MAIN TEXT -->
-    <text x="180" y="65" font-family="Courier New, monospace" font-weight="bold" font-size="55" fill="#ffdd65" filter="url(#dropShadow)" stroke="#000" stroke-width="1">veAERO</text>
-    <text x="180" y="115" font-family="Courier New, monospace" font-weight="bold" font-size="55" fill="#ffdd65" filter="url(#dropShadow)" stroke="#000" stroke-width="1">OPTIMIZER</text>
+    <!-- TITLE TEXT -->
+    <text x="190" y="65" font-family="'Courier New', monospace" font-weight="bold" font-size="55" fill="#ffdd65" filter="url(#dropShadow)" stroke="#000" stroke-width="1">veAERO</text>
+    <text x="190" y="115" font-family="'Courier New', monospace" font-weight="bold" font-size="55" fill="#ffdd65" filter="url(#dropShadow)" stroke="#000" stroke-width="1">OPTIMIZER</text>
 
     <!-- SUBTITLE BOX -->
     <g transform="translate(490, 95)">
       <rect x="0" y="0" width="260" height="35" fill="#000" stroke="#ffdd65" stroke-width="2"/>
-      <text x="130" y="22" font-family="Courier New, monospace" font-size="14" fill="#fff" text-anchor="middle">Automated Yield Management Tool</text>
+      <text x="130" y="22" font-family="'Courier New', monospace" font-size="14" fill="#fff" text-anchor="middle">Automated Yield Management Tool</text>
     </g>
   </g>
 </svg>
