@@ -14,7 +14,7 @@ In an era of frequent **DNS hijacks**, **frontend exploits**, and **phishing dom
 
 1.  **Local Execution:** The dashboard (`dashboard.html`) opens directly from your hard drive. The backend (`server.js`) runs on your machine.
 2.  **Keys Stay Local:** Your private key is stored in a local file (`settings.json`) generated on your computer. It is **never** transmitted to any cloud server or API.
-3.  **Direct RPC Connection:** The bot communicates directly with the Base blockchain nodes (RPC). There is no middleman API that can be compromised to feed you false data.
+3.  **Direct RPC Connection:** The bot communicates directly with the Base blockchain nodes (RPC). There is no middleman API that can be compromised to feed you false data and better to get paid RPC for faster fetching by changing batchsize in server.js from 7 to 15.
 4.  **Open Source:** The code is transparent. You can read exactly how the bot constructs transactions before you run it.
 
 ---
