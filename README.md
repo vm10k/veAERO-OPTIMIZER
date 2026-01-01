@@ -1,5 +1,6 @@
 # veAERO Yield Optimizer (Self-Hosted Dashboard)
 **Consider it aerodrome at home. // the voting page section but running locally with many other features**
+
 **Don't hesitate to report any issue at discord channel link in end of this page.**
 
 <img width="1036" height="256" alt="veAERO Dashboard Interface" src="https://github.com/user-attachments/assets/48ba8a69-d58e-404c-ae7f-66e425e95d81" />
