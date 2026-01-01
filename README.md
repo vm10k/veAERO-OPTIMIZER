@@ -14,7 +14,7 @@ In an era of frequent **DNS hijacks**, **frontend exploits**, and **phishing dom
 
 1.  **Local Execution:** The dashboard (`dashboard.html`) opens directly from your hard drive. The backend (`server.js`) runs on your machine.
 2.  **Keys Stay Local:** Your private key is stored in a local file (`settings.json`) generated on your computer. It is **never** transmitted to any cloud server or API.
-3.  **Direct RPC Connection:** The bot communicates directly with the Base blockchain nodes (RPC). There is no middleman API that can be compromised to feed you false data and better to get private RPC for faster fetching by editing the server.js the batchsize from 7 to 15.
+3.  **Direct RPC Connection:** The bot communicates directly with the Base blockchain nodes (RPC). There is no middleman API that can be compromised to feed you false data.
 4.  **Open Source:** The code is transparent. You can read exactly how the bot constructs transactions before you run it.
 
 ---
@@ -26,7 +26,7 @@ In an era of frequent **DNS hijacks**, **frontend exploits**, and **phishing dom
 *   **Inflation Protection (Rebase):** One-click or automated claiming of weekly rebases to grow your voting power and prevent dilution.
 *   **Reward Aggregation:** Scans all pools for hidden Bribes and Trading Fees earned by your NFT.
 *   **Integrated Odos Swap:** A built-in aggregator that scans your wallet for scattered reward tokens (USDC, WETH, DEGEN, etc.) and performs a batch swap to a single asset (like USDC) in one transaction.
-*   **Performance Tracking:** A visual chart comparing your specific NFT's performance against the "Market Index" (Average of the Top 3 pools not the best analysis but ok).
+*   **Performance Tracking:** A visual chart comparing your specific NFT's performance against the "Market Index" (Average of the Top 3 pools).
 
 ---
 
@@ -96,28 +96,32 @@ The command center for the bot.
 
 You can choose how the bot allocates your voting power in the **Settings** tab.
 
-### 1. Manual Voting
-Total control for the user.
-1.  Go to the **Pools** tab.
-2.  Select specific pools via "Pick Pool".
-3.  Open the Sidebar.
-4.  Use sliders to adjust the weight (e.g., 40% Pool A, 60% Pool B).
-5.  Click **"Cast Vote"**.
+### 1. Best Single Pool
+*   **What it does:** The simplest strategy. It scans all active pools and identifies the single pool with the highest calculated Voter APR.
+*   **How it Votes:** It allocates 100% of your configured voting power to that one winning pool.
+*   **Best For:**
+    *   Users with smaller veAERO positions.
+    *   Scenarios where your vote size is small enough that it won't significantly dilute the APR of the top pool.
 
-### 2. Auto-Strategy: Best Single Pool
-*   **Logic:** Scans all pools, finds the one with the highest vAPR.
-*   **Allocation:** 100% of votes go to that single pool.
-*   **Use Case:** Small voting power where your vote won't dilute the pool's APR.
+### 2. Diversify (Manual)
+*   **What it does:** Allows you to manually control risk by spreading votes. It selects the top N pools by APR, where N is a number you define.
+*   **How it Votes:** It splits your total voting power evenly among the selected pools.
+*   **Example:** If set to 3, it votes for the top 3 pools with 33.3% power each.
+*   **Example:** If set to 5, it votes for the top 5 pools with 20% power each.
+*   **Best For:**
+    *   Users who want to reduce smart contract risk by not going "all in" on one pool.
+    *   Users who want to support specific high-yield ecosystems without concentration.
 
-### 3. Auto-Strategy: Diversified (Manual Split)
-*   **Logic:** You define a number (e.g., Top 5). The bot finds the top 5 highest yielding pools.
-*   **Allocation:** Splits power evenly (e.g., 20% each).
-*   **Use Case:** Risk management; avoiding "all eggs in one basket."
-
-### 4. Auto-Strategy: Optimized (Dilution Aware) 🌟
-*   **Logic:** The bot runs a complex simulation. It calculates: "If I vote 100% on Pool A, does the APR drop so much that Pool B becomes better?"
-*   **Allocation:** It dynamically calculates the perfect split (e.g., 63% Pool A, 27% Pool B, 10% Pool C) to maximize **Total USD Rewards**.
-*   **Use Case:** Whales and Large holders. This prevents you from "nuking" your own yield.
+### 3. Optimized (Automatic & Dilution-Aware) 🌟
+*   **What it does:** This is the "smartest" strategy. Its goal is to maximize Total Projected Dollar Rewards. It understands that casting a massive vote on a small pool crushes the APR (Dilution).
+*   **How it Votes:** The bot runs an internal iterative simulation before voting:
+    *   **Step 1:** Calculates projected rewards if 100% of vote goes to the #1 pool (e.g., Result: $100).
+    *   **Step 2:** Calculates projected rewards if the vote is split 50/50 between #1 and #2. If your vote is large, avoiding dilution on pool #1 might result in a higher total (e.g., Result: $105).
+    *   **Step 3:** It continues this logic (33/33/33, 25/25/25/25) adding pools one by one.
+    *   **Decision:** It stops when adding another pool would result in diminishing returns (lower total USD). It then executes the vote using that optimal split.
+*   **Best For:**
+    *   Whales and Medium-Large holders.
+    *   Ensures you don't "nuke" a pool's APR with your own weight, mathematically securing the highest possible income.
 
 ---
 
