@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>veAERO - Yield Optimizer</title>
+    <!-- Chart.js for the Analysis Tab -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @font-face { font-family: "Retro"; src: url("retro.woff2") format("woff2"); font-weight: 400; }
+        :root { 
+            --bg-color: #3d4a49; 
+            --grid-line-color: rgba(0, 0, 0, 0.2); 
+            --text-color: #ffffff; 
+            --text-secondary-color: #a0b0af; 
+            --text-title-color: #ffffff; 
+            --accent-color: #ffdd65; 
+            --apr-color: #00ff2a; 
+            --panel-shadow-color: rgba(0, 0, 0, 0.7); 
+            --status-connected-color: #00ff2a; 
+            --status-disconnected-color: #ff4d4d; 
+            --sidebar-width: 320px; 
+            --link-color: #65b0ff;
+            --discord-color: #7289da;
+            --bar-bg: #2d3837;
+            --bar-active: #2f5c59;
+            --tooltip-bg: #2a2e3f;
+        }
+		
+		/* ODOS SWAP STYLES */
+.token-picker-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #2d4341;
+    border: 2px solid black;
+    padding: 8px;
+    margin-top: 5px;
+}
+.token-logo-img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid #000;
+}
+.token-input {
+    border: none !important;
+    flex-grow: 1;
+    background: transparent !important;
+    color: white !important;
+    font-family: "Retro", monospace;
+    font-size: 0.9rem;
+    outline: none;
+}
+.swap-list {
+    max-height: 150px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    border: 2px solid #000;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+.swap-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    padding: 6px;
+    border-bottom: 1px dashed rgba(255,255,255,0.1);
+}
+.swap-item:last-child { border-bottom: none; }
+#swap-btn {
+    width: 100%;
+    background-color: #65b0ff;
+    color: black;
+    font-weight: bold;
+    border: 2px solid black;
+    margin-top: 10px;
+}
+#swap-btn:disabled {
+    background-color: var(--text-secondary-color);
+    cursor: not-allowed;
+}
+#scan-wallet-btn {
+    background: transparent;
+    color: #fff;
+    border: 2px solid #fff;
+}
+#scan-wallet-btn:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+
+/* INFO TAB STYLES */
+        /* INFO TAB STYLES - UPDATED */
+       /* INFO TAB STYLES - UPDATED BACKGROUND */
+        .hero-container {
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 20px;
+            padding: 20px;
+            overflow: hidden;
+
+            /* --- MATCHING THE OVERVIEW PANEL STYLE --- */
+            background: transparent;
+            border-color: transparent;
+            
+            /* This applies the "Overview" texture */
+            border-image: url("background-sprite.png");
+            border-image-slice: 34 fill;
+            border-image-width: 35px;
+            border-image-repeat: repeat;
+            
+            /* Shadow effect */
+            filter: drop-shadow(4px 4px 0 var(--panel-shadow-color));
+        }
+
+        /* The Logo - (Kept same as before) */
+        .hero-logo-bg {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            border: 4px solid #000;
+            opacity: 1;
+            filter: none;
+            background-color: #000; /* Keeps logo clearly visible against the wood bg */
+            box-shadow: 5px 5px 0px rgba(0,0,0,0.5);
+            animation: floatLogo 4s ease-in-out infinite;
+        }
+
+        @keyframes floatLogo {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .hero-content {
+            text-align: left;
+            z-index: 2;
+        }
+
+        .hero-title {
+            font-family: "Retro", monospace;
+            font-size: 3.8rem;
+            line-height: 1;
+            color: var(--accent-color); /* Yellow text */
+            text-shadow: 4px 4px 0px #000;
+            margin: 0;
+            letter-spacing: 1px;
+        }
+
+        .hero-subtitle {
+            font-family: "Retro", monospace;
+            margin-top: 15px;
+            color: #fff;
+            background: #000;
+            padding: 8px 15px;
+            display: inline-block;
+            font-size: 1.1rem;
+            border: 1px solid var(--accent-color);
+            box-shadow: 3px 3px 0 rgba(0,0,0,0.5);
+        }
+		
+        .guide-step {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            align-items: flex-start;
+        }
+
+        .step-num {
+            background: var(--accent-color);
+            color: black;
+            font-weight: bold;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid black;
+            flex-shrink: 0;
+        }
+
+        .step-text strong {
+            display: block;
+            color: #fff;
+            margin-bottom: 3px;
+        }
+        
+        .step-text {
+            font-size: 0.9rem;
+            color: var(--text-secondary-color);
+        }
+        #claim-rebase-btn { background-color: #00ff2a; }
+#claim-bribes-btn { background-color: #ff4d4d; color: #fff; }
+#rewards-status { margin-top: 15px; font-weight: bold; }
+
+        html { height: 100%; box-sizing: border-box; }
+        *, *:before, *:after { box-sizing: inherit; }
+        
+        body { 
+            font-family: "Retro", monospace; 
+            background-color: var(--bg-color); 
+            background-image: linear-gradient(var(--grid-line-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line-color) 1px, transparent 1px); 
+            background-size: 25px 25px; 
+            color: var(--text-color); 
+            image-rendering: pixelated; 
+            margin: 0; 
+            padding: 70px 0 80px 0; 
+            overflow-x: hidden;
+        }
+        
+        /* CONTAINER TRANSITION */
+        .container { 
+            max-width: 1200px; 
+            margin-left: auto; margin-right: auto;
+            padding: 15px; 
+            width: 100%; 
+            transition: all 0.3s ease-in-out;
+        }
+        
+        /* Sidebar Push Effect - Mobile Fix Included */
+        body.sidebar-open .container {
+            margin-left: var(--sidebar-width);
+            width: calc(100% - var(--sidebar-width));
+        }
+        
+        /* HEADER */
+        .top-bar { 
+            position: fixed; top: 0; left: 0; right: 0; 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 10px 20px; 
+            background: rgba(45, 67, 65, 0.95); 
+            backdrop-filter: blur(5px); 
+            border-bottom: 2px solid #000; 
+            z-index: 100; 
+            min-height: 60px; 
+        }
+        
+        .top-bar h1 { 
+            position: absolute; left: 50%; transform: translateX(-50%); 
+            font-size: 1.2rem; color: var(--text-title-color); margin: 0; 
+            text-shadow: 2px 2px #000; white-space: nowrap;
+        }
+
+        .top-bar-left, .top-bar-controls { display: flex; align-items: center; z-index: 101; gap: 20px; }
+        
+        /* SIDEBAR */
+        .sidebar { 
+            position: fixed; top: 60px; left: calc(var(--sidebar-width) * -1); bottom: 60px; 
+            width: var(--sidebar-width); background: rgba(35, 50, 48, 0.95); 
+            border-right: 2px solid #000; overflow-y: auto; z-index: 90; 
+            display: flex; flex-direction: column; padding: 15px; 
+            transition: left 0.3s ease-in-out; box-shadow: 5px 0 15px rgba(0,0,0,0.5);
+        }
+        .sidebar.active { left: 0; }
+
+        .sidebar-header { font-size: 1.1rem; color: var(--accent-color); text-align: center; border-bottom: 2px dashed var(--text-secondary-color); padding-bottom: 10px; margin-bottom: 15px; }
+        
+        .picked-pool-item { background: rgba(0,0,0,0.3); border: 2px solid #000; padding: 10px; margin-bottom: 10px; }
+        .picked-pool-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+        .picked-pool-name { color: #65b0ff; font-size: 0.9rem; max-width: 80%; }
+        .remove-btn { background: none; border: none; color: var(--status-disconnected-color); cursor: pointer; font-family: "Retro"; font-size: 1.2rem; }
+        .picked-pool-address { font-size: 0.65rem; color: var(--text-secondary-color); font-family: monospace; margin-bottom: 8px; word-break: break-all; }
+        
+        .picked-pool-controls { display: flex; align-items: center; gap: 8px; }
+        .picked-pool-slider-input { flex-grow: 1; height: 5px; -webkit-appearance: none; background: #000; cursor: pointer; }
+        .picked-pool-slider-input::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; background: var(--accent-color); cursor: pointer; }
+        
+        .picked-pool-input-group { display: flex; align-items: center; gap: 2px; }
+        .tiny-input { width: 45px; background: #1e2b2a; border: 1px solid #000; color: var(--accent-color); font-family: "Retro", monospace; text-align: right; padding: 4px; font-size: 0.8rem; }
+        .picked-pool-input-group span { font-size: 0.8rem; color: var(--accent-color); }
+
+        #vote-summary { margin-top: auto; padding-top: 15px; border-top: 2px dashed var(--text-secondary-color); }
+        #manual-vote-btn { width: 100%; padding: 15px; background: var(--apr-color); color: #000; font-family: "Retro"; border: 2px solid #000; font-weight: bold; cursor: pointer; margin-top: 10px; font-size: 1.1rem; }
+        #manual-vote-btn:disabled { background: var(--text-secondary-color); cursor: not-allowed; }
+
+        .bottom-bar { display: flex; justify-content: space-around; align-items: center; position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(45, 67, 65, 0.8); backdrop-filter: blur(5px); border-top: 2px solid #000; z-index: 100; }
+        .bottom-bar-item { color: var(--text-secondary-color); font-size: 0.9rem; text-align: center; cursor: pointer; flex-grow: 1; padding: 20px 0; }
+        .bottom-bar-item.active { color: var(--accent-color); background-color: rgba(0,0,0,0.2); }
+        
+        .pixel-panel { background: transparent; border-color: transparent; padding: 25px 35px; filter: drop-shadow(4px 4px 0 var(--panel-shadow-color)); color: var(--text-title-color); border-image: url("background-sprite.png"); border-image-slice: 34 fill; border-image-width: 35px; border-image-repeat: repeat; margin-bottom: 20px; overflow: hidden; }
+        
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .stat-card .label { font-size: 0.8rem; color: var(--text-secondary-color); margin-bottom: 5px; }
+        .stat-card .value { font-size: 1.6rem; color: var(--text-title-color); white-space: nowrap; }
+        #pool-count-display { text-align: center; margin: 30px 0 20px 0; font-size: 1.1rem; color: var(--text-secondary-color); }
+        #epoch-countdown-date { font-size: 0.8rem; color: var(--text-secondary-color); margin-top: 5px; }
+
+        .pool-list { display: flex; flex-direction: column; gap: 20px; }
+        .pool-card { display: grid; grid-template-columns: 1fr; gap: 15px; background: rgba(0,0,0,0.2); transition: all 0.2s; }
+        .pool-card.picked { border-left: 5px solid var(--apr-color); background: rgba(0, 255, 42, 0.05); box-shadow: 0 0 15px rgba(0, 255, 42, 0.1); }
+        .pool-card .pool-name { font-size: 1.4rem; color: var(--accent-color); }
+        .pool-card .pool-address { font-family: monospace; font-size: 0.7rem; color: var(--text-secondary-color); word-break: break-all; margin-top: -8px; }
+        .pool-stats { display: grid; grid-template-columns: auto 1fr; gap: 5px 15px; font-size: 0.9rem; }
+        .pool-stats .label { color: var(--text-secondary-color); }
+        .pool-stats .value { color: var(--text-color); }
+        .pool-apr { text-align: left; }
+        .pool-apr .label { font-size: 0.9rem; color: var(--text-secondary-color); }
+        .pool-apr .value { font-size: 3rem; color: var(--apr-color); font-weight: bold; text-shadow: 0 0 8px rgba(0, 255, 42, 0.5); }
+        
+        .status-indicator { display: flex; align-items: center; gap: 10px; }
+        #status-light { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.5); transition: background-color 0.3s ease; }
+        #status-light.connected { background-color: var(--status-connected-color); box-shadow: 0 0 8px var(--status-connected-color); }
+        #status-light.disconnected { background-color: var(--status-disconnected-color); box-shadow: 0 0 8px var(--status-disconnected-color); }
+        #pool-status { font-size: 0.8rem; color: var(--text-secondary-color); }
+        .autovoter-warning { color: var(--status-disconnected-color); background-color: rgba(255, 77, 77, 0.1); border: 1px solid var(--status-disconnected-color); padding: 10px; font-size: 0.8rem; margin-bottom: 20px; line-height: 1.5; }
+        
+        .settings-form { display: flex; flex-direction: column; gap: 15px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        .form-group label { font-size: 0.9rem; color: var(--text-secondary-color); }
+        .form-group input[type="text"], .form-group input[type="password"], .form-group input[type="number"] { font-family: monospace; background-color: #2d4341; border: 2px solid black; color: var(--text-color); padding: 10px; font-size: 1rem; outline: none; }
+        
+        .volume-container { display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,0.2); padding: 15px; border: 2px solid #000; }
+        .volume-bar { display: flex; width: 100%; border: 2px solid #000; height: 40px; }
+        .vol-segment { flex: 1; background: var(--bar-bg); border-right: 2px solid #000; color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; transition: all 0.2s; }
+        .vol-segment:last-child { border-right: none; }
+        .vol-segment:hover { background: #3d504e; color: #fff; }
+        .vol-segment.active { background: var(--accent-color); color: #000; font-weight: bold; box-shadow: inset 0 0 10px rgba(0,0,0,0.2); }
+        .number-display { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+        .number-display input { width: 100px; background: #1e2b2a; border: 2px solid #000; color: var(--accent-color); padding: 8px; font-size: 1.2rem; text-align: right; font-family: "Retro", monospace; }
+        .number-display span { font-size: 1.2rem; color: var(--text-secondary-color); }
+
+        .button-group { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; margin-top: 10px; }
+        .button-group button { font-family: "Retro", monospace; outline: 2px solid black; border: transparent; color: #000; cursor: pointer; padding: 12px 18px; font-size: 1rem; }
+        #save-settings-btn { background-color: var(--accent-color); }
+        #simulate-btn { background-color: #65b0ff; }
+        #fetch-venft-btn { background-color: #9e65ff; }
+        #settings-status { margin-top: 20px; font-size: 1rem; }
+        
+        #simulation-results { margin-top: 30px; }
+        .sim-result-card { background: rgba(0,0,0,0.2); border-left: 4px solid #65b0ff; padding: 15px; margin-bottom: 15px; }
+        .sim-result-card .pool-name { color: #65b0ff; font-size: 1.2rem; }
+        .sim-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+        .sim-stats .label { font-size: 0.8rem; color: var(--text-secondary-color); }
+        .sim-stats .value { font-size: 1.1rem; }
+        .sim-stats .value.apr { color: var(--apr-color); font-weight: bold; }
+        #venft-details { margin-top: 20px; font-size: 1rem; }
+        #autovoter-ui-status { margin-top: 10px; }
+
+        .controls-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 20px; background: rgba(0,0,0,0.2); padding: 15px; margin-bottom: 20px; border: 2px solid black; }
+        .controls-row { display: flex; gap: 20px; align-items: flex-end; }
+        .control-group { position: relative; }
+        .control-group .label { font-size: 0.8rem; color: var(--text-secondary-color); margin-bottom: 8px; display: block; }
+        .dropdown-toggle { font-family: "Retro", monospace; background-color: #2d4341; border: 2px solid black; color: var(--text-color); padding: 10px 15px; font-size: 1rem; cursor: pointer; width: 200px; text-align: left; position: relative; }
+        .dropdown-toggle::after { content: '↓'; position: absolute; right: 15px; }
+        .dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background-color: #2d4341; border: 2px solid black; list-style: none; padding: 0; margin: 5px 0 0 0; width: 200px; z-index: 10; }
+        .control-group.active .dropdown-menu { display: block; }
+        .dropdown-menu-item { padding: 10px 15px; cursor: pointer; }
+        .dropdown-menu-item:hover { background-color: var(--accent-color); color: black; }
+        .dropdown-menu-item.selected { color: var(--accent-color); font-weight: bold; }
+        .search-group { flex-grow: 1; }
+        #search-input { font-family: "Retro", monospace; background-color: #2d4341; border: 2px solid black; color: var(--text-color); padding: 10px 15px; font-size: 1rem; width: 100%; outline: none; }
+        #search-input::placeholder { color: var(--text-secondary-color); }
+        
+        .pool-actions { grid-column: 1 / -1; margin-top: 1px; padding-top: 1px; border-top: 1px dashed var(--grid-line-color); display: flex; justify-content: flex-end; }
+        .pick-pool-btn { font-family: "Retro", monospace; background-color: transparent; border: 2px solid #ffdd65; color: #ffdd65; padding: 10px 20px; font-size: 1rem; cursor: pointer; transition: all 0.2s; font-weight: bold; }
+        .pick-pool-btn:hover { background-color: #ffdd65; color: black; }
+        .pick-pool-btn.picked { background-color: var(--apr-color); color: black; border-color: black; }
+
+        #menu-toggle-btn { font-family: "Retro", monospace; background: transparent; color: var(--accent-color); border: 2px solid var(--accent-color); padding: 5px 15px; cursor: pointer; font-size: 0.9rem; white-space: nowrap; }
+        #menu-toggle-btn:hover { background: var(--accent-color); color: black; }
+        
+        .settings-link { color: var(--link-color); text-decoration: none; border-bottom: 1px dashed var(--link-color); margin-right: 15px; }
+        .settings-link.discord { color: var(--discord-color); border-color: var(--discord-color); }
+        .settings-link:hover { background-color: rgba(255,255,255,0.1); }
+        
+        .transactions-table-container { overflow-x: auto; }
+        .retro-table { width: 100%; border-collapse: collapse; font-family: "Retro", monospace; font-size: 0.9rem; min-width: 600px; }
+        .retro-table th, .retro-table td { border: 2px solid black; padding: 12px; text-align: left; }
+        .retro-table th { background-color: rgba(45, 67, 65, 0.8); color: var(--accent-color); }
+        .retro-table tr:nth-child(even) { background-color: rgba(0,0,0,0.1); }
+        .status-confirmed { color: var(--apr-color); }
+        .status-failed { color: var(--status-disconnected-color); }
+        .my-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+
+        /* --- ANALYSIS TAB & TOOLTIP STYLES --- */
+        .chart-header { display: flex; gap: 30px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-start; }
+        .chart-stat-big { display: flex; flex-direction: column; }
+        .chart-stat-big .label { color: var(--text-secondary-color); font-size: 0.9rem; margin-bottom: 5px; }
+        .chart-stat-big .value { font-size: 2.2rem; font-weight: bold; }
+        .chart-wrapper { position: relative; height: 350px; width: 100%; border: 2px solid #000; background: rgba(0,0,0,0.2); padding: 15px; }
+        #no-analysis-data { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--text-secondary-color); text-align: center; display: none; }
+        
+        /* INFO ICON AND TOOLTIP */
+        .info-icon-container {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 20px; height: 20px; 
+            border: 1px solid var(--link-color); color: var(--link-color);
+            border-radius: 50%; font-size: 12px; cursor: help; margin-left: auto;
+            position: relative;
+        }
+        .tooltip-box {
+            display: none; position: absolute; top: 30px; right: 0; width: 300px;
+            background-color: var(--tooltip-bg); padding: 15px;
+            border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 200;
+            text-align: left;
+        }
+        .info-icon-container:hover .tooltip-box { display: block; }
+        .tooltip-item { margin-bottom: 15px; }
+        .tooltip-item:last-child { margin-bottom: 0; }
+        .tooltip-title { font-weight: bold; color: #fff; margin-bottom: 4px; font-size: 0.9rem; }
+        .tooltip-desc { color: var(--text-secondary-color); font-size: 0.8rem; line-height: 1.4; }
+        
+        .strategy-group { margin-top: 20px; border-top: 2px solid black; padding-top: 20px; }
+        .strategy-selector button { font-size: 0.9rem; padding: 10px 15px; }
+        .strategy-selector button.active { background-color: var(--accent-color); }
+        .strategy-selector button.inactive { background-color: #2d4341; color: var(--text-secondary-color); }
+        #diversification-pools-input { width: 80px; text-align: center; }
+
+        @media (min-width: 768px) { .pool-card { grid-template-columns: 2fr 1fr; align-items: center; } .pool-apr { text-align: right; } }
+        
+        /* Mobile Specifics */
+        @media (max-width: 768px) {
+            .top-bar h1 { display: none; }
+            body.sidebar-open .container { pointer-events: none; } /* Prevents clicking background on mobile */
+            .sidebar { width: 85%; left: -85%; }
+            body.sidebar-open .sidebar { left: 0; box-shadow: 10px 0 20px rgba(0,0,0,0.8); }
+            :root { --sidebar-width: 85%; }
+            .controls-row { width: 100%; flex-direction: row; }
+            .control-group { flex: 1; }
+            .dropdown-toggle { width: 100%; }
+            .pick-pool-btn { width: 100%; }
+            .chart-header { gap: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <button id="menu-toggle-btn">MY VOTES</button>
+        </div>
+        <h1>veAERO - Yield Optimizer</h1>
+        <div class="top-bar-controls">
+            <div class="status-indicator">
+                <span id="status-light" class="disconnected"></span>
+                <span id="pool-status">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <aside class="sidebar">
+        <div class="sidebar-header">MY VOTE CARD</div>
+        <div id="picked-pools-list">
+            <div style="text-align:center; color: var(--text-secondary-color); margin-top: 20px;">
+                No pools picked.<br>Click "Pick Pool" on a card.
+            </div>
+        </div>
+        <div id="vote-summary">
+            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                <span>Total Allocated:</span>
+                <span id="total-allocated-percent" style="color: var(--accent-color);">0%</span>
+            </div>
+            <button id="manual-vote-btn" disabled>CAST VOTE</button>
+        </div>
+    </aside>
+
+
+    <main id="info-view" class="container" style="display: none;">
+        <div class="hero-container">
+            <img src="https://dd.dexscreener.com/ds-data/tokens/base/0x940181a94a35a4569e4529a3cdfb74e38fd98631.png" class="hero-logo-bg" alt="AERO Logo">
+            
+            <div class="hero-content">
+                <h1 class="hero-title">veAERO<br>OPTIMIZER</h1>
+                <div class="hero-subtitle">Automated Yield Management Tool</div>
+            </div>
+        </div>
+
+        <section class="pixel-panel">
+            <h2 style="color: var(--accent-color); margin-top: 0;">Overview</h2>
+            <p style="line-height: 1.6; color: var(--text-secondary-color);">
+                This tool is a specialized automation bot for <strong>Aerodrome Finance</strong> on the Base network. It optimizes your voting power to maximize weekly rewards.
+            </p>
+            <ul style="line-height: 1.8; color: var(--text-color); list-style-type: square; padding-left: 20px;">
+                <li><strong>Auto-Voting:</strong> Scans all pools to find the highest APR opportunities automatically.</li>
+                <li><strong>Smart Diversification:</strong> Spreads votes across multiple high-yield pools to reduce risk.</li>
+                <li><strong>Rebase & Compound:</strong> Automatically claims weekly inflation protection and locks it back to grow your veNFT.</li>
+                <li><strong>Reward Swapping:</strong> Aggregates all bribing tokens and swaps them to USDC (or AERO) in one click.</li>
+            </ul>
+        </section>
+
+        <section class="pixel-panel">
+            <h2 style="color: #65b0ff; margin-top: 0;">How to Use</h2>
+            
+            <div class="guide-step">
+                <div class="step-num">1</div>
+                <div class="step-text">
+                    <strong>Connect & Configure</strong>
+                    Go to the <em>Settings</em> tab. Enter your <strong>veNFT ID</strong> (or comma-separated IDs). If you want to use the Auto-Voter, enter your private key (stored locally only).
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">2</div>
+                <div class="step-text">
+                    <strong>Scan Pools</strong>
+                    Go to the <em>Pools</em> tab. Wait for the initial scan. The bot fetches live bribes and fees from the blockchain to calculate real APRs.
+                </div>
+            </div>
+
+            <div class="guide-step">
+                <div class="step-num">3</div>
+                <div class="step-text">
+                    <strong>Activate Auto-Pilot</strong>
+                    In <em>Settings</em>, scroll to "Auto-Compound". Set your interval (e.g., 24 hours) and click "Start". The bot will now sleep and wake up to claim rewards and rebase automatically.
+                </div>
+            </div>
+        </section>
+        
+        <div style="text-align: center; margin-top: 20px; font-size: 0.8rem; color: #666;">
+            Made with ❤️ for the community. by vm10k
+        </div>
+    </main>
+    <main id="pools-view" class="container">
+        <section class="summary-grid" id="summary-section"></section>
+        
+        <section class="pixel-panel">
+            <h2 style="margin-top:0;">Bot Status</h2>
+            <div id="autovoter-status" style="font-size: 1.1rem; color: var(--accent-color);">Awaiting configuration in the Settings tab.</div>
+        </section>
+
+        <div class="controls-bar">
+             <div class="controls-row">
+                <div class="control-group" id="filter-control">
+                    <span class="label">POOLS</span>
+                    <button class="dropdown-toggle" id="filter-toggle-btn">Most Rewarded</button>
+                    <ul class="dropdown-menu" id="filter-menu">
+                        <li class="dropdown-menu-item selected" data-value="most-rewarded">Most Rewarded</li>
+                        <li class="dropdown-menu-item" data-value="least-rewarded">Least Rewarded</li>
+                        <li class="dropdown-menu-item" data-value="all">All Pools</li>
+                    </ul>
+                </div>
+                <div class="control-group" id="sort-control">
+                    <span class="label">SORT</span>
+                    <button class="dropdown-toggle" id="sort-toggle-btn">vAPR</button>
+                    <ul class="dropdown-menu" id="sort-menu">
+                        <li class="dropdown-menu-item selected" data-value="totalAPR">vAPR</li>
+                        <li class="dropdown-menu-item" data-value="tvl">TVL</li>
+                        <li class="dropdown-menu-item" data-value="votes">Votes</li>
+                        <li class="dropdown-menu-item" data-value="rewards">Rewards</li>
+                        <li class="dropdown-menu-item" data-value="fees">Fees</li>
+                        <li class="dropdown-menu-item" data-value="bribes">Incentives</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="control-group search-group">
+                <span class="label">SEARCH</span>
+                <input type="text" id="search-input" placeholder="Symbol or address...">
+            </div>
+        </div>
+
+        <h2 id="pool-count-display">Configure in Settings to begin scanning.</h2>
+        <section class="pool-list" id="pool-list">
+            <div class="pixel-panel" style="text-align:center;">Pool data will appear here after the initial scan.</div>
+        </section>
+    </main>
+
+    <main id="analysis-view" class="container" style="display: none;">
+        <section class="pixel-panel">
+            <h2 style="margin-top:0; color: var(--accent-color); display: flex; align-items: center; gap: 10px;">
+                Historical Performance
+            </h2>
+            
+            <div class="chart-header">
+                <div class="chart-stat-big">
+                    <span class="label">my little autovoter APR</span>
+                    <span class="value" id="chart-autopilot-apr" style="color: var(--apr-color);">--%</span>
+                </div>
+                <div class="chart-stat-big">
+                    <span class="label">Index APR</span>
+                    <span class="value" id="chart-index-apr" style="color: var(--link-color);">--%</span>
+                </div>
+                <div class="chart-stat-big">
+                    <span class="label">Outperformance</span>
+                    <span class="value" id="chart-outperformance" style="color: var(--accent-color);">--%</span>
+                </div>
+                
+                <div class="info-icon-container">
+                    i
+                    <div class="tooltip-box">
+                        <div class="tooltip-item">
+                            <div class="tooltip-title">little autovoter</div>
+                            <div class="tooltip-desc">The APR little autovoter achieved each epoch, including Rebase and after fees.</div>
+                        </div>
+                        <div class="tooltip-item">
+                            <div class="tooltip-title">Index APR</div>
+                            <div class="tooltip-desc">Average APR of Aerodrome's top 3 reward pools, updated each epoch.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-wrapper">
+                <div id="no-analysis-data">
+                    No historical epoch data found.<br>
+                    Data will appear after the first scan completes.
+                </div>
+                <canvas id="performanceChart"></canvas>
+            </div>
+            
+            <div style="margin-top: 15px; color: var(--text-secondary-color); font-size: 0.8rem; text-align: center;">
+                Real-time tracking of Bot Performance vs. Market Index (Top 3 Pools).
+            </div>
+        </section>
+
+        <section class="pixel-panel">
+             <h2 style="margin-top:0; color: var(--accent-color);">Strategy Insights</h2>
+             <div class="summary-grid">
+                 <div class="stat-card">
+                     <div class="label">Win Rate</div>
+                     <div class="value" id="insight-winrate">--%</div>
+                     <div style="font-size:0.7rem; color:#888;">Epochs outperforming index</div>
+                 </div>
+                 <div class="stat-card">
+                     <div class="label">Avg. Pools Voted</div>
+                     <div class="value" id="insight-pools">0</div>
+                 </div>
+                 <div class="stat-card">
+                     <div class="label">Avg. Outperformance</div>
+                     <div class="value" id="insight-avg-out" style="color: var(--apr-color);">--%</div>
+                 </div>
+             </div>
+        </section>
+    </main>
+
+    <main id="settings-view" class="container" style="display: none;">
+        <section class="pixel-panel">
+            <h2 style="margin-top:0; color: var(--accent-color);">Bot & Simulation Configuration</h2>
+            <p class="autovoter-warning">
+                <strong>IMPORTANT:</strong> The private key is for the auto-voter only. It is only stored in the current session.
+            </p>
+            <div class="settings-form">
+                <div class="form-group">
+                    <label for="private-key">Bot Wallet Private Key (for auto-voting only)</label>
+                    <input type="password" id="private-key" placeholder="0x...">
+					
+                </div>
+                <div class="form-group">
+    <label for="token-id">veNFT Token IDs (Comma separated for multiple)</label>
+    <input type="text" id="token-id" placeholder="e.g., 91799, 92100, 10500">
+</div>
+                
+                <div class="form-group">
+                    <label for="vote-percentage">Auto-Vote Power Percentage</label>
+                    <div class="volume-container">
+                        <div class="volume-bar">
+                            <div class="vol-segment" data-val="0">0%</div>
+                            <div class="vol-segment" data-val="10">10%</div>
+                            <div class="vol-segment" data-val="25">25%</div>
+                            <div class="vol-segment" data-val="50">50%</div>
+                            <div class="vol-segment" data-val="75">75%</div>
+                            <div class="vol-segment active" data-val="100">100%</div>
+                        </div>
+                        <div class="number-display">
+                            <input type="number" id="vote-percentage" min="0" max="100" step="0.01" value="100">
+                            <span>%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="button-group">
+                    <button id="fetch-venft-btn">Fetch veNFT Details</button>
+                    <button id="simulate-btn">Simulate Vote</button>
+                    <button id="save-settings-btn">Confirm & Save Settings</button>
+                    <button id="toggle-autovoter-btn">Enable Auto-Voter</button> 
+                </div>
+                
+                <div class="strategy-group">
+                    <div class="form-group">
+                        <label>Auto-Voter Strategy</label>
+                        <div class="strategy-selector button-group">
+                            <button id="strategy-optimized-btn" data-strategy="optimized">Optimized (Automatic)</button>
+                            <button id="strategy-diversified-btn" data-strategy="diversified">Diversify (Manual)</button>
+                            <button id="strategy-single-btn" data-strategy="single">Best Single Pool</button>
+                        </div>
+                    </div>
+                    <div class="form-group" id="diversification-options" style="display: none;">
+                        <label for="diversification-pools-input">Number of Pools to Vote For</label>
+                        <input type="number" id="diversification-pools-input" value="3" min="2">
+                    </div>
+                </div>
+            </div>
+            <div id="settings-status">Status: Not configured.</div>
+            <div id="autovoter-ui-status"></div>
+            <div id="venft-details"></div>
+<div class="pixel-panel" style="margin-top: 20px; border-left: 5px solid var(--accent-color); background: rgba(0,0,0,0.1);">
+    <h2 style="margin-top:0; color: var(--accent-color);">Auto-Compound & Rewards</h2>
+    
+    <div style="background: rgba(0,0,0,0.2); border: 2px dashed #ffdd65; padding: 15px; margin-bottom: 20px;">
+        <h3 style="margin-top:0; color:#ffdd65; font-size:1rem;">Auto-Pilot Configuration</h3>
+        
+        <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+            <div class="form-group" style="flex:1; min-width:150px;">
+                <label style="color:#a0b0af;">Run Every (Hours)</label>
+                <input type="number" id="auto-interval-input" value="24" min="0.5" step="0.5" style="text-align:center;">
+            </div>
+            <div class="form-group" style="flex:2; min-width:200px;">
+                <label style="color:#a0b0af;">Target Token (Receive)</label>
+                <div class="token-picker-container" style="margin-top:0;">
+                    <img src="https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png" class="token-logo-img" alt="USDC">
+                    <input type="text" id="target-token-address" class="token-input" value="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" placeholder="Target Address">
+                    <span style="font-size:0.8rem; color:var(--accent-color);">USDC</span>
+                </div>
+            </div>
+        </div>
+
+        <button id="toggle-auto-compound-btn" style="width: 100%; margin-top: 15px; background-color: #ffdd65; color: black; font-weight: bold; padding: 15px; border: 2px solid black; cursor: pointer; font-family: 'Retro'; font-size: 1.1rem; transition: all 0.2s;">
+            START AUTO-PILOT
+        </button>
+        
+        <div id="auto-pilot-status" style="text-align: center; margin-top: 10px; font-size: 0.9rem; color: #888; font-weight:bold;">
+            Status: Stopped
+        </div>
+    </div>
+
+   
+</div>
+            <div class="pixel-panel" style="margin-top: 20px; border-left: 5px solid var(--accent-color); background: rgba(0,0,0,0.1);">
+                <h2 style="margin-top:0; color: var(--accent-color);">Rewards & Rebases</h2>
+                <div style="font-size:0.9rem; margin-bottom:15px; color:var(--text-secondary-color);">
+                    Manually claim accumulated rewards for your configured veNFT.
+                </div>
+                <div class="button-group">
+                    <button id="claim-rebase-btn" title="Claims inflation protection (Rebase) to wallet">Claim Rebase</button>
+                    <button id="claim-bribes-btn" title="Claims Bribes & Fees for active votes">Claim Voting Rewards</button>
+                </div>
+            <div class="pixel-panel" style="margin-top: 20px; border-left: 5px solid #65b0ff; background: rgba(0,0,0,0.1);">
+                <h2 style="margin-top:0; color: #65b0ff;">Swap Rewards via Odos</h2>
+                <div style="font-size:0.9rem; margin-bottom:15px; color:var(--text-secondary-color);">
+                    Multi-swap all discovered tokens in your wallet to a single asset.
+                </div>
+                
+                <div class="form-group">
+                    <label>Target Token (Receive)</label>
+                    <div class="token-picker-container">
+                        <img src="https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png" class="token-logo-img" alt="USDC">
+                        <input type="text" id="target-token-address" class="token-input" value="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" placeholder="Target Token Address">
+                        <span style="font-size:0.8rem; color:var(--accent-color);">USDC</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <label style="font-size:0.9rem; color:var(--text-secondary-color);">Wallet Assets to Swap:</label>
+                    <div id="swap-list-container" class="swap-list">
+                        <div style="text-align:center; padding:10px; color:#888;">
+                            1. Click "Scan Wallet"<br>
+                            2. List populates<br>
+                            3. Click "Swap"
+                        </div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="scan-wallet-btn">1. Scan Wallet</button>
+                    <button id="swap-btn" disabled>2. Swap All to Target</button>
+                </div>
+                <div id="swap-status" style="margin-top: 10px; font-weight: bold; color: #65b0ff; min-height: 20px;"></div>
+            </div>
+                <div id="rewards-status"></div>
+            </div>
+            <div id="simulation-results" style="display: none;">
+                <h3 style="color: #65b0ff;">Simulation Outcome</h3>
+                <div id="simulation-results-content"></div>
+            </div>
+        </section>
+
+        <section class="pixel-panel" style="margin-top: 20px;">
+            <h2 style="margin-top:0; color: var(--accent-color);">About & Support</h2>
+            <div style="line-height: 1.8; font-size: 0.9rem;">
+                <div><strong style="color: var(--text-secondary-color);">Author:</strong> vm10k</div>
+                <div><strong style="color: var(--text-secondary-color);">Donation Address:</strong> <span style="font-family:monospace; color: var(--apr-color); word-break: break-all;">0x22f9790175ef4f549092C91123E0f7C339CC7D3D</span></div>
+                <div style="margin-top: 15px;">
+                    <a href="https://github.com/vm10k" class="settings-link">GitHub</a>
+                    <a href="https://discord.gg/SGgnvyjFn5" class="settings-link discord">Discord Channel</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <main id="transactions-view" class="container" style="display: none;">
+        <section class="my-stats-grid">
+            <div class="pixel-panel stat-card">
+                <div class="label">Total Estimated Earnings</div>
+                <div class="value" id="stats-earnings" style="color: var(--apr-color);">$0.00</div>
+            </div>
+            <div class="pixel-panel stat-card">
+                <div class="label">Current veAERO Holdings</div>
+                <div class="value" id="stats-holdings">--</div>
+            </div>
+            <div class="pixel-panel stat-card">
+                <div class="label">Voting Power Config</div>
+                <div class="value" id="stats-percent">--%</div>
+            </div>
+        </section>
+        
+        <section class="pixel-panel">
+            <h2 style="margin-top:0; color: var(--accent-color);">Transaction History</h2>
+            <div class="transactions-table-container">
+                <table class="retro-table" id="tx-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Pools</th>
+                            <th>Est. Value</th>
+                            <th>Tx Hash</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tx-table-body">
+                        <tr><td colspan="6" style="text-align:center">Loading history...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+    
+    <nav class="bottom-bar">
+	        <div id="tab-info" class="bottom-bar-item">Info</div>
+        <div id="tab-pools" class="bottom-bar-item active">Pools</div>
+        <div id="tab-analysis" class="bottom-bar-item">Analysis</div>
+        <div id="tab-transactions" class="bottom-bar-item">Transactions</div>
+        <div id="tab-settings" class="bottom-bar-item">Settings</div>
+    </nav>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            Chart.defaults.font.family = '"Retro", monospace';
+            Chart.defaults.color = '#a0b0af';
+            Chart.defaults.scale.grid.color = 'rgba(255, 255, 255, 0.05)';
+
+            const app = {
+                socket: null,
+                summaryData: {},
+                epochCountdownInterval: null,
+                allPools: [], 
+                pickedPools: {}, 
+                transactionHistory: [], 
+                epochHistory: {}, 
+                currentFilter: 'most-rewarded', 
+                currentSort: 'totalAPR',
+                currentSearchQuery: '',
+				swapTokensData: [], 
+                chartInstance: null,
+                
+                init: function() {
+                    this.loadLocalData();
+                    this.connectWebSocket();
+                    this.setupEventListeners();
+                },
+                
+                loadLocalData: function() {
+                    try {
+                        const stored = localStorage.getItem('veAERO_EpochHistory_JSON');
+                        if (stored) {
+                            this.transactionHistory = JSON.parse(stored);
+                            this.renderTransactions({ history: this.transactionHistory, totalEarnings: 0, votingPower: "0" }, true);
+                        }
+                    } catch (e) { console.error(e); }
+                },
+
+                saveLocalData: function() {
+                    if (this.transactionHistory.length > 0) {
+                        localStorage.setItem('veAERO_EpochHistory_JSON', JSON.stringify(this.transactionHistory));
+                    }
+                },
+
+                connectWebSocket: function() {
+                    const wsUrl = `ws://localhost:3000`;
+                    this.socket = new WebSocket(wsUrl);
+
+                    const statusTextEl = document.getElementById('pool-status');
+                    const statusLightEl = document.getElementById('status-light');
+                    const autovoterStatusEl = document.getElementById('autovoter-status');
+                    const settingsStatusEl = document.getElementById('settings-status');
+                    const poolCountEl = document.getElementById('pool-count-display');
+                    const simResultsEl = document.getElementById('simulation-results');
+                    const simResultsContentEl = document.getElementById('simulation-results-content');
+                    const venftDetailsEl = document.getElementById('venft-details');
+
+                    const setStatus = (text, isConnected) => {
+                        statusTextEl.textContent = text;
+                        statusLightEl.className = isConnected ? 'connected' : 'disconnected';
+                    };
+
+                    this.socket.onopen = () => setStatus("Connected", true);
+                    this.socket.onclose = () => {
+                        setStatus("Disconnected", false);
+                        setTimeout(() => this.connectWebSocket(), 3000); 
+                    };
+                    this.socket.onerror = () => setStatus("Connection Error", false);
+
+                    this.socket.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        switch (message.type) {
+                            case 'status': setStatus(message.message, true); break;
+                            case 'scanning_progress':
+                                const { scanned, total, active } = message.data;
+                                poolCountEl.textContent = `Scanning... [${scanned}/${total}] | ${active} active pools found.`;
+                                break;
+                            case 'pools': 
+                                this.allPools = message.data;
+                                this.applyFiltersAndRender();
+                                break;
+								case 'rewards_tx_result':
+    const rStat = document.getElementById('rewards-status');
+    rStat.textContent = message.message;
+    rStat.style.color = message.success ? 'var(--apr-color)' : 'var(--status-disconnected-color)';
+    break;
+	case 'wallet_balances_result':
+    this.renderSwapList(message.data);
+    break;
+case 'swap_status':
+    const sEl = document.getElementById('swap-status');
+    sEl.textContent = message.message;
+    
+    sEl.style.opacity = '0.5';
+    setTimeout(() => sEl.style.opacity = '1', 100);
+    break;
+                            case 'summary':
+                                this.summaryData = message.data;
+                                this.renderSummary(message.data); 
+                                this.startCountdown(message.data.epochVoteEnd);
+                                break;
+                            case 'epoch_history_update':
+                                
+                                if (this.summaryData && this.summaryData.epochVoteEnd) {
+                                    const nowSeconds = Math.floor(Date.now() / 1000);
+                                    if (nowSeconds >= this.summaryData.epochVoteEnd) {
+                                        console.log("Epoch Ended. Freezing history chart to prevent race-condition reset.");
+                                        break; 
+                                    }
+                                }
+                               
+
+                                this.epochHistory = message.data;
+                                if(document.getElementById('analysis-view').style.display !== 'none') {
+                                    this.initAnalysisChart();
+                                }
+                                break;
+                            case 'autovoter_status': autovoterStatusEl.innerHTML = `<strong>${message.message}</strong>`; break;
+                            case 'settings_response':
+                                settingsStatusEl.textContent = `Status: ${message.message}`;
+                                settingsStatusEl.style.color = message.success ? 'var(--apr-color)' : 'var(--status-disconnected-color)';
+                                break;
+                            case 'simulation_result':
+                                simResultsEl.style.display = 'block';
+                                if (message.success) {
+                                    const resultsHtml = message.data.map(pool => `
+                                        <div class="sim-result-card">
+                                            <div class="pool-name">${pool.name}</div>
+                                            <div class="sim-stats">
+                                                <div><div class="label">Projected APR</div><div class="value apr">${pool.projectedAPR.toFixed(2)}%</div></div>
+                                                <div><div class="label">Est. Weekly Rewards</div><div class="value">$${pool.projectedUserWeeklyRewards.toLocaleString('en-US', {maximumFractionDigits: 2})}</div></div>
+                                            </div>
+                                        </div>`).join('');
+                                    simResultsContentEl.innerHTML = resultsHtml;
+                                } else { simResultsContentEl.innerHTML = `<p style="color: var(--status-disconnected-color);">${message.message}</p>`; }
+                                break;
+                            case 'venft_details_result':
+                                if (message.success) {
+                                    venftDetailsEl.innerHTML = `veNFT Power: <strong>${parseFloat(message.data.votingPower).toLocaleString('en-US', {maximumFractionDigits: 2})} veAERO</strong>`;
+                                    venftDetailsEl.style.color = 'var(--apr-color)';
+                                } else { venftDetailsEl.innerHTML = `Error: ${message.message}`; venftDetailsEl.style.color = 'var(--status-disconnected-color)'; }
+                                break;
+                            case 'autovoter_config_status': this.updateAutovoterUI(message.data); break;
+                            case 'transaction_update': 
+                                this.renderTransactions(message.data); 
+                                this.saveLocalData();
+                                break;
+                            case 'vote_status': alert(message.message); break;
+                        }
+                    };
+                },
+
+                renderSummary: function(data) {
+                    const summaryEl = document.getElementById('summary-section');
+                    if (!data || !data.epochVoteEnd) {
+                        summaryEl.innerHTML = ``;
+                        return;
+                    }
+                    const formatNumber = (num, digits = 0) => Number(num).toLocaleString('en-US', { maximumFractionDigits: digits });
+                    const formatCurrency = (num) => `$${formatNumber(num, 2)}`;
+                    
+                    const stats = [
+                        { label: 'Total Voting Power', value: `${formatNumber(data.totalVotingPower)} veAERO` },
+                        { label: 'Weekly Emissions', value: `${formatNumber(data.weeklyEmissions)} AERO` },
+                        { label: 'Total Fees Value', value: formatCurrency(data.totalFees) },
+                        { label: 'Total Bribes Value', value: formatCurrency(data.totalIncentives) },
+                        { label: 'Total Rewards Value', value: formatCurrency(data.totalRewards) },
+                        { label: 'Epoch Ends', value: `<div id="epoch-countdown">--d --h --m --s</div><div id="epoch-countdown-date">${new Date(data.epochVoteEnd * 1000).toLocaleString()}</div>` }
+                    ];
+                    summaryEl.innerHTML = stats.map(stat => `<div class="pixel-panel stat-card"><div class="label">${stat.label}</div><div class="value">${stat.value}</div></div>`).join('');
+                },
+                
+                startCountdown: function(epochEndTimestamp) {
+                    if (this.epochCountdownInterval) clearInterval(this.epochCountdownInterval);
+                    const countdownEl = document.getElementById('epoch-countdown');
+                    if (!countdownEl) return;
+                    const update = () => {
+                        const now = Math.floor(Date.now() / 1000);
+                        const remaining = epochEndTimestamp - now;
+                        if (remaining <= 0) { countdownEl.textContent = "Epoch Ended"; clearInterval(this.epochCountdownInterval); return; }
+                        const days = Math.floor(remaining / 86400);
+                        const hours = Math.floor((remaining % 86400) / 3600);
+                        const minutes = Math.floor((remaining % 3600) / 60);
+                        const seconds = remaining % 60;
+                        countdownEl.textContent = `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+                    };
+                    update();
+                    this.epochCountdownInterval = setInterval(update, 1000);
+                },
+
+                updateAutovoterUI: function(config) {
+                     const btn = document.getElementById('toggle-autovoter-btn');
+                     const statusEl = document.getElementById('autovoter-ui-status');
+                     const strategyBtns = document.querySelectorAll('.strategy-selector button');
+                     const divOptions = document.getElementById('diversification-options');
+                     const divInput = document.getElementById('diversification-pools-input');
+
+                     if (config.enabled) {
+                         btn.textContent = 'Disable Auto-Voter';
+                         btn.style.backgroundColor = 'var(--status-connected-color)';
+                         statusEl.innerHTML = `Auto-Voter: <strong style="color: var(--status-connected-color);">ENABLED</strong>`;
+                     } else {
+                         btn.textContent = 'Enable Auto-Voter';
+                         btn.style.backgroundColor = 'var(--status-disconnected-color)';
+                         statusEl.innerHTML = `Auto-Voter: <strong style="color: var(--status-disconnected-color);">DISABLED</strong>`;
+                     }
+                     strategyBtns.forEach(b => {
+                         if (b.dataset.strategy === config.voteStrategy) { b.classList.add('active'); b.classList.remove('inactive'); }
+                         else { b.classList.add('inactive'); b.classList.remove('active'); }
+                     });
+                     divOptions.style.display = config.voteStrategy === 'diversified' ? 'block' : 'none';
+                     divInput.value = config.diversificationPools;
+                },
+
+                applyFiltersAndRender: function() {
+                    let pools = [...this.allPools];
+                    if (this.currentSearchQuery) {
+                        pools = pools.filter(p => p.name.toLowerCase().includes(this.currentSearchQuery) || p.address.toLowerCase().includes(this.currentSearchQuery));
+                    }
+                    if (this.currentFilter === 'most-rewarded') pools = pools.filter(p => p.totalAPR > 0);
+                    else if (this.currentFilter === 'least-rewarded') pools = pools.filter(p => p.totalAPR === 0 && parseFloat(p.votingPower) > 0);
+                    
+                    const sortBy = this.currentSort;
+                    pools.sort((a, b) => {
+                        if (sortBy === 'votes') return parseFloat(b.votingPower) - parseFloat(a.votingPower);
+                        if (sortBy === 'rewards') {
+                            const rewardsA = a.totalFeesUSD + a.totalBribesUSD;
+                            const rewardsB = b.totalFeesUSD + b.totalBribesUSD;
+                            return rewardsB - rewardsA;
+                        }
+                        if (sortBy === 'bribes') return b.totalBribesUSD - a.totalBribesUSD;
+                        return b[sortBy] - a[sortBy];
+                    });
+                    this.renderPools(pools);
+                },
+
+                renderPools: function(pools) {
+                    const listEl = document.getElementById('pool-list');
+                    const countEl = document.getElementById('pool-count-display');
+                    pools = pools || [];
+                    const { totalVotablePools } = this.summaryData;
+                    
+                    if (this.allPools.length > 0 && totalVotablePools) {
+                        countEl.textContent = `Showing ${pools.length} of ${this.allPools.length} active pools. (${totalVotablePools} total on-chain)`;
+                    }
+
+                    if (pools.length === 0) { listEl.innerHTML = `<div class="pixel-panel" style="text-align:center;">No pools match filters.</div>`; return; }
+                    
+                    const formatCurrency = (num) => `$${Number(num).toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+
+                    listEl.innerHTML = pools.map((pool) => {
+                        const isPicked = this.pickedPools[pool.address] !== undefined;
+                        const btnText = isPicked ? '✓ ADDED' : 'Pick Pool';
+                        const btnClass = isPicked ? 'pick-pool-btn picked' : 'pick-pool-btn';
+                        const cardClass = isPicked ? 'pixel-panel pool-card picked' : 'pixel-panel pool-card';
+                        return `<div class="${cardClass}">
+                                    <div class="pool-details">
+                                        <div class="pool-name">${pool.name}</div>
+                                        <div class="pool-address">${pool.address}</div>
+                                        <div class="pool-stats">
+                                            <div class="label">TVL:</div> <div class="value">${formatCurrency(pool.tvl)}</div>
+                                            <div class="label">VOTES:</div> <div class="value">${pool.votesFmt} veAERO</div>
+                                            <div class="label">REWARDS:</div> <div class="value">${formatCurrency(pool.totalBribesUSD + pool.totalFeesUSD)}/w</div>
+                                        </div>
+                                    </div>
+                                    <div class="pool-apr">
+                                        <div class="label">Voter APR</div>
+                                        <div class="value">${Number(pool.totalAPR).toFixed(2)}%</div>
+                                    </div>
+                                    <div class="pool-actions">
+                                        <button class="${btnClass}" onclick="app.togglePick('${pool.address}')">${btnText}</button>
+                                    </div>
+                                </div>`;
+                    }).join('');
+                },
+
+                togglePick: function(address) {
+                    if (this.pickedPools[address]) delete this.pickedPools[address];
+                    else {
+                        const pool = this.allPools.find(p => p.address === address);
+                        if (!pool) return;
+                        this.pickedPools[address] = { name: pool.name, percent: 0 };
+                    }
+                    this.renderSidebar();
+                    this.applyFiltersAndRender();
+                },
+                
+                renderSidebar: function() {
+                    const container = document.getElementById('picked-pools-list');
+                    const addresses = Object.keys(this.pickedPools);
+                    if (addresses.length === 0) { container.innerHTML = `<div style="text-align:center;color:var(--text-secondary-color);margin-top:20px;">No pools picked.</div>`; this.updateTotalPercent(); return; }
+                    container.innerHTML = addresses.map(addr => {
+                        const p = this.pickedPools[addr];
+                        return `<div class="picked-pool-item" id="sidebar-item-${addr}">
+                            <div class="picked-pool-top"><span class="picked-pool-name">${p.name}</span><button class="remove-btn" onclick="app.togglePick('${addr}')">×</button></div>
+                            <div class="picked-pool-address">${addr}</div>
+                            <div class="picked-pool-controls">
+                                <input type="range" class="picked-pool-slider-input" min="0" max="100" value="${p.percent}" oninput="app.updatePercent('${addr}', this.value, 'slider')">
+                                <div class="picked-pool-input-group"><input type="number" class="tiny-input" min="0" max="100" value="${p.percent}" oninput="app.updatePercent('${addr}', this.value, 'input')"><span>%</span></div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                    this.updateTotalPercent();
+                },
+
+                updatePercent: function(address, value, source) {
+                    let val = parseInt(value) || 0;
+                    if (val < 0) val = 0; if (val > 100) val = 100;
+                    if (this.pickedPools[address]) this.pickedPools[address].percent = val;
+                    const item = document.getElementById(`sidebar-item-${address}`);
+                    if (item) {
+                        if (source === 'slider') item.querySelector('.tiny-input').value = val;
+                        if (source === 'input') item.querySelector('.picked-pool-slider-input').value = val;
+                    }
+                    this.updateTotalPercent();
+                },
+                
+                updateTotalPercent: function() {
+                    const total = Object.values(this.pickedPools).reduce((sum, p) => sum + p.percent, 0);
+                    const display = document.getElementById('total-allocated-percent');
+                    const btn = document.getElementById('manual-vote-btn');
+                    display.textContent = `${total}%`;
+                    if (total > 100) { display.style.color = 'var(--status-disconnected-color)'; btn.disabled = true; btn.textContent = "Over 100%"; }
+                    else if (total === 0 && Object.keys(this.pickedPools).length > 0) { display.style.color = 'var(--text-secondary-color)'; btn.disabled = false; btn.textContent = "Cast Vote (0%)"; }
+                    else if (Object.keys(this.pickedPools).length === 0) { btn.disabled = true; btn.textContent = "Cast Vote"; }
+                    else { display.style.color = 'var(--apr-color)'; btn.disabled = false; btn.textContent = "CAST VOTE"; }
+                },
+
+                castVote: function() {
+                    const votes = Object.entries(this.pickedPools).map(([addr, data]) => ({ address: addr, percent: data.percent }));
+                    if (votes.length === 0) return alert("No pools selected.");
+                    if(confirm(`Cast manual vote for ${votes.length} pools?`)) {
+                         this.socket.send(JSON.stringify({ type: 'cast_manual_vote', data: { votes } }));
+                    }
+                },
+
+                renderTransactions: function(data, isCached = false) {
+                    const { history, totalEarnings, votingPower, votePercentage } = data;
+                    
+                    if (!isCached) {
+                        this.transactionHistory = history;
+                    }
+
+                    if (totalEarnings !== undefined) document.getElementById('stats-earnings').textContent = `$${totalEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    if (votingPower && votingPower !== "0") document.getElementById('stats-holdings').textContent = `${parseFloat(votingPower).toLocaleString('en-US', { maximumFractionDigits: 2 })} veAERO`;
+                    if (votePercentage) document.getElementById('stats-percent').textContent = `${votePercentage}%`;
+                    
+                    const tbody = document.getElementById('tx-table-body');
+                    const displayHistory = isCached ? this.transactionHistory : history;
+
+                    if (!displayHistory || displayHistory.length === 0) { 
+                        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center">No transactions recorded yet.</td></tr>`; 
+                        return; 
+                    }
+
+                    tbody.innerHTML = displayHistory.map(tx => {
+                        const date = new Date(tx.timestamp).toLocaleString();
+                        const shortHash = tx.hash === 'N/A' ? 'N/A' : `${tx.hash.substring(0,6)}...`;
+                        const statusClass = tx.status.startsWith('Failed') ? 'status-failed' : 'status-confirmed';
+                        const poolList = Array.isArray(tx.pools) ? tx.pools.join(', ') : tx.pools;
+                        return `<tr><td>${date}</td><td>${tx.type}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poolList}</td><td>$${(tx.value||0).toFixed(2)}</td><td style="font-family:monospace;">${shortHash}</td><td class="${statusClass}">${tx.status}</td></tr>`;
+                    }).join('');
+                },
+
+
+renderSwapList: function(tokens) {
+    const el = document.getElementById('swap-list-container');
+    const btn = document.getElementById('swap-btn');
+    this.swapTokensData = tokens;
+
+    if(!tokens || tokens.length === 0) {
+        el.innerHTML = '<div style="text-align:center; padding:10px; color:#888;">No assets found > $0.10</div>';
+        btn.disabled = true;
+        return;
+    }
+
+    let html = '';
+    tokens.forEach(t => {
+        const amt = parseFloat(t.amount / (10 ** t.decimals)).toLocaleString('en-US', {maximumFractionDigits: 4});
+        
+        
+        const usdDisplay = t.usdValue ? `$${t.usdValue.toFixed(2)}` : 'Unknown';
+        
+       
+        const logo = t.logoUrl ? t.logoUrl : 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png'; 
+
+        html += `<div class="swap-item">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <img src="${logo}" style="width:24px; height:24px; border-radius:50%; border:1px solid #000;" onerror="this.style.display='none'"> 
+                        <span style="color:var(--accent-color); font-weight:bold;">${t.symbol}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <div>${amt}</div>
+                        <div style="font-size:0.75rem; color:#888;">${usdDisplay}</div>
+                    </div>
+                 </div>`;
+    });
+    el.innerHTML = html;
+    btn.disabled = false;
+    document.getElementById('swap-status').textContent = `Found ${tokens.length} tokens > $0.10. Ready to swap.`;
+},
+
+               
+                initAnalysisChart: function() {
+                    const noDataEl = document.getElementById('no-analysis-data');
+                    const historyKeys = Object.keys(this.epochHistory).sort((a,b) => parseInt(a) - parseInt(b));
+                    
+                    if (historyKeys.length === 0) {
+                        noDataEl.style.display = 'block';
+                        return;
+                    } else {
+                        noDataEl.style.display = 'none';
+                    }
+
+                    const labels = [];
+                    const dataAuto = [];
+                    const dataIndex = [];
+                    let totalPoolsVoted = 0;
+                    let wins = 0;
+                    let totalOutperf = 0;
+                    let count = 0;
+
+                    historyKeys.forEach(key => {
+                        const d = this.epochHistory[key];
+                        labels.push(`Epoch ${d.epochId}`);
+                        dataAuto.push(d.userApr);
+                        dataIndex.push(d.indexApr);
+                        
+                        
+                        if(d.poolsVoted) totalPoolsVoted += d.poolsVoted;
+                        if(d.userApr > d.indexApr) wins++;
+                        if(d.indexApr > 0) totalOutperf += (d.userApr - d.indexApr);
+                        count++;
+                    });
+
+                    
+                    const lastEpoch = this.epochHistory[historyKeys[historyKeys.length - 1]];
+                    const diff = lastEpoch.userApr - lastEpoch.indexApr;
+                    const diffSign = diff >= 0 ? '+' : '';
+                    const diffPercent = lastEpoch.indexApr > 0 ? (diff/lastEpoch.indexApr)*100 : 0;
+                    
+                    document.getElementById('chart-autopilot-apr').textContent = `${lastEpoch.userApr.toFixed(2)}%`;
+                    document.getElementById('chart-index-apr').textContent = `${lastEpoch.indexApr.toFixed(2)}%`;
+                    document.getElementById('chart-outperformance').textContent = `${diffSign}${diffPercent.toFixed(1)}%`;
+
+                    
+                    document.getElementById('insight-winrate').textContent = count > 0 ? `${((wins/count)*100).toFixed(0)}%` : '--%';
+                    document.getElementById('insight-pools').textContent = count > 0 ? Math.round(totalPoolsVoted/count) : 0;
+                    document.getElementById('insight-avg-out').textContent = count > 0 ? `${(totalOutperf/count).toFixed(2)}%` : '--%';
+
+                    const ctx = document.getElementById('performanceChart').getContext('2d');
+                    if(this.chartInstance) this.chartInstance.destroy();
+
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: 'My Little Autovoter APR',
+                                    data: dataAuto,
+                                    borderColor: '#00ff2a',
+                                    backgroundColor: 'rgba(0, 255, 42, 0.1)',
+                                    borderWidth: 2,
+                                    tension: 0.2,
+                                    pointBackgroundColor: '#00ff2a',
+                                    fill: true
+                                },
+                                {
+                                    label: 'Index APR (Top 3 Pools)',
+                                    data: dataIndex,
+                                    borderColor: '#65b0ff',
+                                    borderDash: [5, 5],
+                                    borderWidth: 2,
+                                    tension: 0.2,
+                                    pointBackgroundColor: '#65b0ff'
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: {
+                                legend: { labels: { color: '#ffffff', font: { family: '"Retro", monospace' } } },
+                                tooltip: {
+                                    backgroundColor: '#2a2e3f',
+                                    titleFont: { family: '"Retro", monospace' },
+                                    bodyFont: { family: '"Retro", monospace' },
+                                    callbacks: {
+                                        afterBody: function(context) {
+                                            const autoVal = context[0].parsed.y;
+                                            const indexVal = context[1].parsed.y;
+                                            if(indexVal === 0) return '';
+                                            const diff = autoVal - indexVal;
+                                            return `Difference: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`;
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0b0af', font: { family: '"Retro", monospace' } } },
+                                y: { 
+                                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                                    ticks: { color: '#a0b0af', font: { family: '"Retro", monospace' }, callback: (v) => v + '%' },
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    });
+                },
+
+                setupEventListeners: function() {
+                   
+                    const tabInfo = document.getElementById('tab-info');
+                    const tabPools = document.getElementById('tab-pools');
+                    const tabSettings = document.getElementById('tab-settings');
+                    const tabTransactions = document.getElementById('tab-transactions');
+                    const tabAnalysis = document.getElementById('tab-analysis');
+
+                   
+                    const viewInfo = document.getElementById('info-view');
+                    const viewPools = document.getElementById('pools-view');
+                    const viewSettings = document.getElementById('settings-view');
+                    const viewTransactions = document.getElementById('transactions-view');
+                    const viewAnalysis = document.getElementById('analysis-view');
+                    
+                    const switchTab = (activeTab, activeView) => {
+                        
+                        [tabInfo, tabPools, tabSettings, tabTransactions, tabAnalysis].forEach(t => t.classList.remove('active'));
+                        [viewInfo, viewPools, viewSettings, viewTransactions, viewAnalysis].forEach(v => v.style.display = 'none');
+                        
+                       
+                        activeTab.classList.add('active');
+                        activeView.style.display = 'block';
+                    };
+
+                   
+                    tabInfo.addEventListener('click', () => switchTab(tabInfo, viewInfo));
+                    tabPools.addEventListener('click', () => switchTab(tabPools, viewPools));
+                    tabSettings.addEventListener('click', () => switchTab(tabSettings, viewSettings));
+                    
+                    tabAnalysis.addEventListener('click', () => {
+                        switchTab(tabAnalysis, viewAnalysis);
+                        this.initAnalysisChart();
+                    });
+
+                    tabTransactions.addEventListener('click', () => {
+                        switchTab(tabTransactions, viewTransactions);
+                        this.renderTransactions({ history: this.transactionHistory, totalEarnings: 0 }, true);
+                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                            this.socket.send(JSON.stringify({ type: 'get_transactions' }));
+                        }
+                    });
+const autoBtn = document.getElementById('toggle-auto-compound-btn');
+const autoStatus = document.getElementById('auto-pilot-status');
+let isAutoRunning = false;
+
+autoBtn.addEventListener('click', () => {
+    const hours = document.getElementById('auto-interval-input').value;
+    const target = document.getElementById('target-token-address').value;
+
+    if (!target) return alert("Please enter a Target Token Address (e.g., USDC) first.");
+
+    if (!isAutoRunning) {
+       
+        this.socket.send(JSON.stringify({
+            type: 'toggle_auto_compound',
+            data: { 
+                enabled: true, 
+                intervalHours: hours, 
+                targetToken: target 
+            }
+        }));
+
+        
+        isAutoRunning = true;
+        autoBtn.textContent = "STOP AUTO-PILOT";
+        autoBtn.style.backgroundColor = "#ff4d4d"; // Red
+        autoBtn.style.color = "white";
+        autoStatus.textContent = `🚀 RUNNING: Every ${hours} Hours`;
+        autoStatus.style.color = "#00ff2a";
+        
+    } else {
+        
+        this.socket.send(JSON.stringify({
+            type: 'toggle_auto_compound',
+            data: { enabled: false }
+        }));
+
+        
+        isAutoRunning = false;
+        autoBtn.textContent = "START AUTO-PILOT";
+        autoBtn.style.backgroundColor = "#ffdd65"; // Yellow
+        autoBtn.style.color = "black";
+        autoStatus.textContent = "Status: Stopped";
+        autoStatus.style.color = "#888";
+    }
+});
+                    const saveBtn = document.getElementById('save-settings-btn');
+                    const simulateBtn = document.getElementById('simulate-btn');
+                    const fetchVeNftBtn = document.getElementById('fetch-venft-btn');
+                    const privateKeyInput = document.getElementById('private-key');
+                    const tokenIdInput = document.getElementById('token-id');
+                    const votePercentageInput = document.getElementById('vote-percentage');
+                    const toggleAutovoterBtn = document.getElementById('toggle-autovoter-btn');
+                    const strategyBtns = document.querySelectorAll('.strategy-selector button');
+                    const divInput = document.getElementById('diversification-pools-input');
+                    const searchInput = document.getElementById('search-input');
+                    const manualVoteBtn = document.getElementById('manual-vote-btn');
+                    const menuToggleBtn = document.getElementById('menu-toggle-btn');
+                    const settingsStatusEl = document.getElementById('settings-status');
+                    const simResultsContainerEl = document.getElementById('simulation-results');
+                    const simResultsContentEl = document.getElementById('simulation-results-content');
+                    
+                    
+                    const segments = document.querySelectorAll('.vol-segment');
+                    segments.forEach(seg => {
+                        seg.addEventListener('click', () => {
+                            segments.forEach(s => s.classList.remove('active'));
+                            seg.classList.add('active');
+                            votePercentageInput.value = seg.dataset.val;
+                        });
+                    });
+                    votePercentageInput.addEventListener('input', (e) => {
+                        const val = e.target.value;
+                        segments.forEach(s => s.classList.toggle('active', s.dataset.val === val));
+                    });
+                    
+                    manualVoteBtn.addEventListener('click', () => this.castVote());
+                    searchInput.addEventListener('input', () => { this.currentSearchQuery = searchInput.value.trim().toLowerCase(); this.applyFiltersAndRender(); });
+
+                    const sidebar = document.querySelector('.sidebar');
+                    const body = document.body;
+                    menuToggleBtn.addEventListener('click', () => {
+                        sidebar.classList.toggle('active');
+                        body.classList.toggle('sidebar-open');
+                        if(sidebar.classList.contains('active')) {
+                            menuToggleBtn.textContent = "HIDE VOTES";
+                            menuToggleBtn.style.backgroundColor = "var(--accent-color)";
+                            menuToggleBtn.style.color = "black";
+                        } else {
+                            menuToggleBtn.textContent = "MY VOTES";
+                            menuToggleBtn.style.backgroundColor = "transparent";
+                            menuToggleBtn.style.color = "var(--accent-color)";
+                        }
+                    });
+
+                    const setupDropdown = (controlEl, toggleBtn, appStateKey) => {
+                        const menuItems = controlEl.querySelectorAll('.dropdown-menu-item');
+                        toggleBtn.addEventListener('click', (e) => { e.stopPropagation(); controlEl.classList.toggle('active'); });
+                        menuItems.forEach(item => {
+                            item.addEventListener('click', () => {
+                                toggleBtn.textContent = item.textContent;
+                                this[appStateKey] = item.dataset.value;
+                                menuItems.forEach(i => i.classList.remove('selected'));
+                                item.classList.add('selected');
+                                this.applyFiltersAndRender();
+                                controlEl.classList.remove('active');
+                            });
+                        });
+                    };
+                    setupDropdown(document.getElementById('filter-control'), document.getElementById('filter-toggle-btn'), 'currentFilter');
+                    setupDropdown(document.getElementById('sort-control'), document.getElementById('sort-toggle-btn'), 'currentSort');
+                    document.addEventListener('click', () => {
+                        document.getElementById('filter-control').classList.remove('active');
+                        document.getElementById('sort-control').classList.remove('active');
+                    });
+document.getElementById('claim-rebase-btn').addEventListener('click', () => { 
+    if(confirm("Claim Rebase to wallet?")) this.socket.send(JSON.stringify({type: 'claim_rebase'})); 
+});
+document.getElementById('claim-bribes-btn').addEventListener('click', () => { 
+    if(confirm("Scan voted pools and claim all bribes?")) this.socket.send(JSON.stringify({type: 'claim_bribes'})); 
+});
+
+                    const sendStrategyUpdate = () => {
+                        let activeStrategy = 'optimized'; 
+                        strategyBtns.forEach(b => { if (b.classList.contains('active')) activeStrategy = b.dataset.strategy; });
+                         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                            this.socket.send(JSON.stringify({ type: 'set_vote_strategy', data: { strategy: activeStrategy, pools: divInput.value } }));
+                        }
+                    };
+                    strategyBtns.forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            if (btn.classList.contains('active')) return;
+                            strategyBtns.forEach(b => { b.classList.toggle('active', b === btn); b.classList.toggle('inactive', b !== btn); });
+                            sendStrategyUpdate();
+                        });
+                    });
+                    divInput.addEventListener('change', sendStrategyUpdate);
+                    
+                    const validateSimInputs = () => {
+    const tokenIdStr = tokenIdInput.value.trim();
+    const votePercentage = parseFloat(votePercentageInput.value.trim());
+    
+    
+    if (!tokenIdStr || !/^[\d,\s]+$/.test(tokenIdStr)) {
+        alert('Please provide valid veNFT Token IDs (numbers separated by commas).');
+        return null;
+    }
+    
+    if (isNaN(votePercentage) || votePercentage < 0 || votePercentage > 100) {
+        alert('Please provide a valid vote percentage between 0 and 100.');
+        return null;
+    }
+    
+    
+    return { tokenId: tokenIdStr, votePercentage };
+}
+
+                    fetchVeNftBtn.addEventListener('click', () => {
+                        const tokenId = tokenIdInput.value.trim();
+                        if (!tokenId || isNaN(parseInt(tokenId))) {
+                            return alert('Please provide a valid veNFT Token ID number.');
+                        }
+                        if (this.socket && this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'fetch_venft_details', data: { tokenId } }));
+                        else alert('WebSocket is not connected. Please wait for a connection.');
+                    });
+
+                    simulateBtn.addEventListener('click', () => {
+                        const inputs = validateSimInputs();
+                        if (!inputs) return;
+                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                             this.socket.send(JSON.stringify({ type: 'simulate_vote', data: inputs }));
+                             simResultsContainerEl.style.display = 'block';
+                             simResultsContentEl.innerHTML = 'Running simulation on server...';
+                        }
+                        else alert('WebSocket is not connected. Please wait for a connection.');
+                    });
+
+document.getElementById('scan-wallet-btn').addEventListener('click', () => {
+    if(this.socket.readyState===1) {
+        this.socket.send(JSON.stringify({type:'scan_wallet_balances'}));
+        document.getElementById('swap-status').textContent = "Scanning blockchain...";
+    }
+});
+
+document.getElementById('swap-btn').addEventListener('click', () => {
+    const target = document.getElementById('target-token-address').value.trim();
+    if(!target) return alert("Please enter a target token address.");
+    if(!this.swapTokensData || !this.swapTokensData.length) return alert("Please scan wallet first.");
+    
+    if(confirm(`Swap ${this.swapTokensData.length} tokens to Target Address?`)) {
+        this.socket.send(JSON.stringify({
+            type: 'execute_odos_swap',
+            data: { inputTokens: this.swapTokensData, outputToken: target }
+        }));
+    }
+});
+                    saveBtn.addEventListener('click', () => {
+                        const privateKey = privateKeyInput.value.trim();
+                        const simInputs = validateSimInputs();
+                        if (!simInputs) return;
+                        if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
+                            return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
+                        }
+                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                            this.socket.send(JSON.stringify({ type: 'save_settings', data: { privateKey, ...simInputs } }));
+                            settingsStatusEl.textContent = 'Status: Sending to server...';
+                            settingsStatusEl.style.color = 'var(--text-secondary-color)';
+                        }
+                        else alert('WebSocket is not connected. Please wait for a connection.');
+                    });
+
+                    toggleAutovoterBtn.addEventListener('click', () => {
+                         if (this.socket && this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'toggle_autovoter' }));
+                         else alert('WebSocket is not connected. Please wait for a connection.');
+                    });
+
+                    window.app = this;
+                }
+            };
+            app.init();
+        });
+    </script>
+</body>
+</html>
