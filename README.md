@@ -142,6 +142,7 @@ Aerodrome rewards come in many forms (AERO, USDC, WETH, and various bribe tokens
 *   `settings.json`: (Created after save) Stores your encrypted config locally.
 *   `transactions.json`: (Created automatically) Stores your historical activity logs.
 *   `epochs.json`: (Created automatically) Stores data for the Analysis chart.
+*   `background-sprite.png`: for the UI
 
 ---
 
