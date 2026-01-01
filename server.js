@@ -763,7 +763,8 @@ wss.on('connection', ws => {
                     ws.send(JSON.stringify({ type: 'status', message: 'Auto-Pilot Activated' }));
                     
                     
-                    const runAutoSequence = async () => {
+
+const runAutoSequence = async () => {
                         console.log("⏰ Auto-Pilot Triggered");
                         ws.send(JSON.stringify({ type: 'swap_status', message: '🚀 Auto-Pilot Running...' }));
 
@@ -773,22 +774,40 @@ wss.on('connection', ws => {
                            
                             try {
                                 const tx = await performRebase(autovoterConfig.signer, autovoterConfig.tokenId);
-                                await tx.wait();
-                                ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rebase Complete' }));
-                            } catch(e) { console.log("Rebase skip"); }
+                              
+                                if (tx) {
+                                    await tx.wait();
+                                    ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rebase Complete' }));
+                                } else {
+                                    console.log("No Rebase needed.");
+                                }
+                            } catch(e) { console.log("Rebase skip:", e.message); }
 
                            
                             try {
                                 const tx = await performClaimBribes(autovoterConfig.signer, autovoterConfig.tokenId, latestFetchedData.pools);
-                                await tx.wait();
-                                ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rewards Claimed' }));
-                            } catch(e) { console.log("Claim skip:", e.message); }
+                               
+                                if (tx) {
+                                    await tx.wait();
+                                    ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rewards Claimed' }));
+                                } else {
+                                     console.log("No rewards to claim.");
+                                     ws.send(JSON.stringify({ type: 'swap_status', message: 'No new rewards found. checking the wallet.' }));
+                                }
+                            } catch(e) { 
+                                console.log("Claim skip:", e.message); 
+                                
+                            }
 
                            
                             const balances = await scanWalletBalances(autovoterConfig.signer.address);
+                            
                             if(balances.length > 0) {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `Swapping ${balances.length} tokens...` }));
-                                const count = await executeOdosSwap(autovoterConfig.signer, balances, targetToken);
+                                
+                                
+                                const count = await executeOdosSwap(balances, targetToken);
+                                
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `✅ Auto-Swap: ${count} tokens swapped.` }));
                             } else {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: 'No tokens found to swap.' }));
@@ -801,7 +820,6 @@ wss.on('connection', ws => {
                             ws.send(JSON.stringify({ type: 'swap_status', message: `⚠️ Error: ${e.message}` }));
                         }
                     };
-
                     
                     runAutoSequence();
 
