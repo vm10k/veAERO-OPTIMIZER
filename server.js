@@ -36,7 +36,7 @@ const abi = {
         "function gaugeToBribe(address gauge) view returns (address)",
         "function weights(address pool) view returns (uint256)",
         "function isAlive(address gauge) view returns (bool)",
-		"function claimFees(address[] _fees, address[][] _tokens, uint256 _tokenId) external", // <--- ADD THIS
+		"function claimFees(address[] _fees, address[][] _tokens, uint256 _tokenId) external",
 		
         "function vote(uint256 tokenId, address[] calldata _poolVote, uint256[] calldata _weights) external",
         "function claimBribes(address[] _bribes, address[][] _tokens, uint256 _tokenId) external",
@@ -1703,3 +1703,4 @@ loadSettings();
 loadTransactions();
 loadEpochHistory();
 startScheduledScan();
+
