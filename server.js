@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "https://base.meowrpc.com",
+    rpcUrl: "https://rpc.ankr.com/base/f2e65ac303fcd581edf8efd92fc78a0b0c2021ced1626fdf6bb6f0e8ce0b3cef",
     voteLeadTime: 300, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -85,7 +85,8 @@ let autovoterConfig = {
     votePercentage: 100,
     enabled: false,
     voteStrategy: 'optimized', 
-    diversificationPools: 3
+    diversificationPools: 3,
+	scanMode: 'scheduled' 
 };
 let isLoopRunning = false;
 
@@ -94,11 +95,31 @@ function loadSettings() {
         if (fs.existsSync(settingsFilePath)) {
             const data = fs.readFileSync(settingsFilePath, 'utf8');
             const savedSettings = JSON.parse(data);
+            
             autovoterConfig.tokenId = savedSettings.tokenId || null;
+            autovoterConfig.tokenIds = savedSettings.tokenIds || []; 
             autovoterConfig.votePercentage = savedSettings.votePercentage || 100;
             autovoterConfig.enabled = savedSettings.enabled || false;
             autovoterConfig.voteStrategy = savedSettings.voteStrategy || 'optimized';
             autovoterConfig.diversificationPools = savedSettings.diversificationPools || 3;
+			autovoterConfig.scanMode = savedSettings.scanMode || 'scheduled'; 
+            
+            if (savedSettings.privateKey) {
+                try {
+                    autovoterConfig.privateKey = savedSettings.privateKey;
+                    autovoterConfig.signer = new ethers.Wallet(savedSettings.privateKey, provider);
+                    console.log(`Restored wallet session: ${autovoterConfig.signer.address}`);
+                    
+                    
+                    if (!autovoterConfig.tokenIds.length && autovoterConfig.tokenId) {
+                        autovoterConfig.tokenIds = [autovoterConfig.tokenId];
+                    }
+                } catch (e) {
+                    console.error("Failed to restore wallet from saved private key:", e.message);
+                }
+            }
+            
+
             console.log("Loaded settings from settings.json");
         }
     } catch (error) {
@@ -143,7 +164,7 @@ function saveEpochHistory() {
 function logTransaction(type, txHash, pools, estimatedValueUSD, status) {
     const txData = {
         timestamp: Date.now(),
-        type: type, // 'Auto-Vote', 'Manual-Vote'
+        type: type, 
         hash: txHash,
         pools: pools,
         value: estimatedValueUSD || 0,
@@ -701,6 +722,16 @@ loadEpochHistory();
 
 wss.on('connection', ws => {
     console.log('Client connected.');
+
+    
+    const uiConfig = {
+        ...autovoterConfig,
+        hasWallet: !!autovoterConfig.signer, 
+        privateKey: "" 
+    };
+
+    ws.send(JSON.stringify({ type: 'autovoter_config_status', data: uiConfig }));
+	
     ws.send(JSON.stringify({ type: 'autovoter_config_status', data: autovoterConfig }));
     ws.send(JSON.stringify({ type: 'epoch_history_update', data: epochHistory }));
 
@@ -721,33 +752,47 @@ wss.on('connection', ws => {
                 }
             };
 
-            if (parsed.type === 'save_settings') {
-    startMainLoopOnce();
-    
-    const { privateKey, tokenId, votePercentage } = parsed.data; 
+if (parsed.type === 'save_settings') {
+    const { privateKey, tokenId, votePercentage, scanMode } = parsed.data; 
+
     try {
         const percent = parseFloat(votePercentage);
         if (isNaN(percent) || percent < 0 || percent > 100) throw new Error("Invalid percentage.");
 
-        const wallet = privateKey ? new ethers.Wallet(privateKey, provider) : ethers.Wallet.createRandom();
+        const wallet = privateKey ? new ethers.Wallet(privateKey, provider) : null;
         
         
         const ids = tokenId.toString().split(',').map(id => id.trim()).filter(id => id !== '');
-        if (ids.length === 0) throw new Error("No valid Token IDs provided.");
-
+        
+       
+        
+        autovoterConfig.privateKey = privateKey;
         autovoterConfig.signer = wallet;
         autovoterConfig.tokenIds = ids; 
+        autovoterConfig.tokenId = ids.length > 0 ? ids[0] : null; 
         autovoterConfig.votePercentage = percent;
+        autovoterConfig.scanMode = scanMode || 'scheduled';
 
-        console.log(`Bot configured for ${ids.length} NFTs. Wallet: ${wallet.address}`);
-        saveCurrentSettings();
-        ws.send(JSON.stringify({ type: 'settings_response', success: true, message: `Settings saved. Managing ${ids.length} veNFTs.` }));
+        const statusMsg = ids.length > 0 
+            ? `Bot configured for ${ids.length} NFTs.` 
+            : `Bot configured in Watch-Only mode (No IDs).`;
+
+        console.log(`${statusMsg} Mode: ${autovoterConfig.scanMode}`);
+        saveCurrentSettings(); 
+        
+        ws.send(JSON.stringify({ type: 'settings_response', success: true, message: `${statusMsg} Mode: ${autovoterConfig.scanMode}` }));
+
+        
+        if (autovoterConfig.scanMode === 'immediate') {
+            startScheduledScan(); 
+        }
+
     } catch (e) {
-                    autovoterConfig.signer = null;
-                    const errorMessage = e.message.toLowerCase().includes("private key") ? 'Error: Invalid private key.' : `Error: ${e.message}`;
-                    ws.send(JSON.stringify({ type: 'settings_response', success: false, message: errorMessage }));
-                }
-            }
+        autovoterConfig.signer = null;
+        const errorMessage = e.message.toLowerCase().includes("private key") ? 'Error: Invalid private key.' : `Error: ${e.message}`;
+        ws.send(JSON.stringify({ type: 'settings_response', success: false, message: errorMessage }));
+    }
+}
 			
             else if (parsed.type === 'toggle_auto_compound') {
                 const { enabled, intervalHours, targetToken } = parsed.data;
@@ -1593,14 +1638,68 @@ async function mainLoop() {
     finally { isFetching = false; }
 }
 
-function startMainLoopOnce() {
-    if (isLoopRunning) {
+async function startScheduledScan() {
+    if (isLoopRunning) return;
+    if (autovoterConfig.scanMode === 'immediate') {
+        console.log("\n=== IMMEDIATE MODE ACTIVATED ===");
+        console.log("Skipping Epoch Timer. Starting scan loop now...");
+        
+        broadcast({ type: 'status', message: `Immediate Mode: Scanning now...` });
+        
+        isLoopRunning = true;
+        await mainLoop(); 
+        setInterval(mainLoop, config.fetchInterval); 
         return;
     }
-    isLoopRunning = true;
-    console.log("Initial user action detected. Starting the main application loop.");
-    mainLoop();
-    setInterval(mainLoop, config.fetchInterval);
+
+    console.log("Syncing with Blockchain Epoch Timer (Scheduled Mode)...");
+
+    try {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        
+        let epochEnd = await voterContract.epochVoteEnd(currentTimestamp);
+        
+        const LEAD_TIME = 900; 
+        
+        let targetTimestamp = Number(epochEnd) - LEAD_TIME;
+        let delayMs = (targetTimestamp - currentTimestamp) * 1000;
+
+        
+        if (delayMs <= 0) {
+            console.log("Info: Previous window passed. Calculating for NEXT Epoch...");
+            targetTimestamp += (7 * 24 * 60 * 60); 
+            delayMs = (targetTimestamp - currentTimestamp) * 1000;
+        }
+
+        const hoursToWait = (delayMs / 1000 / 60 / 60).toFixed(2);
+
+        console.log(`\n=== STANDBY MODE ===`);
+        console.log(`Current Time:    ${new Date().toLocaleString()}`);
+        console.log(`Scan Starts:     ${new Date(targetTimestamp * 1000).toLocaleString()} (15m before vote)`);
+        console.log(`Status:          Sleeping for ${hoursToWait} hours.`);
+        console.log(`====================\n`);
+
+        
+        setTimeout(() => {
+            broadcast({ type: 'status', message: `Standby. Scanning starts in ${hoursToWait} hours.` });
+            broadcast({ type: 'scanning_progress', data: { scanned: 0, total: 0, active: 0 } });
+        }, 2000);
+
+        
+        setTimeout(() => {
+            console.log("⏰ WAKE UP! Starting heavy scanning sequence...");
+            isLoopRunning = true;
+            mainLoop(); 
+            setInterval(mainLoop, config.fetchInterval); 
+        }, delayMs);
+
+    } catch (e) {
+        console.error("Error syncing time (RPC might be down). Retrying in 30 seconds...", e.message);
+        setTimeout(startScheduledScan, 30000);
+    }
 }
 
-console.log("Application starting... awaiting user configuration to begin scanning.");
+loadSettings(); 
+loadTransactions();
+loadEpochHistory();
+startScheduledScan();
