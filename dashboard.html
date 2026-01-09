@@ -645,6 +645,16 @@
     <input type="text" id="token-id" placeholder="e.g., 91799, 92100, 10500">
 </div>
                 
+<div class="form-group">
+    <label>Bot Scan Mode</label>
+    <div class="strategy-selector button-group" id="scan-mode-selector">
+        <button type="button" id="mode-scheduled-btn" class="active" data-mode="scheduled">Scheduled (15m before Epoch)</button>
+        <button type="button" id="mode-immediate-btn" class="inactive" data-mode="immediate">Immediate (Continuous)</button>
+    </div>
+    <div style="font-size: 0.8rem; color: var(--text-secondary-color); margin-top: 5px;">
+        <strong>Scheduled:</strong> Sleeps until voting window opens. <strong>Immediate:</strong> Scans/Simulates every 5 mins.
+    </div>
+</div>
                 <div class="form-group">
                     <label for="vote-percentage">Auto-Vote Power Percentage</label>
                     <div class="volume-container">
@@ -968,7 +978,20 @@ case 'swap_status':
                                     venftDetailsEl.style.color = 'var(--apr-color)';
                                 } else { venftDetailsEl.innerHTML = `Error: ${message.message}`; venftDetailsEl.style.color = 'var(--status-disconnected-color)'; }
                                 break;
-                            case 'autovoter_config_status': this.updateAutovoterUI(message.data); break;
+                            case 'autovoter_config_status': 
+    this.updateAutovoterUI(message.data);
+        const mode = message.data.scanMode || 'scheduled';
+    const schedBtn = document.getElementById('mode-scheduled-btn');
+    const immBtn = document.getElementById('mode-immediate-btn');
+    
+    if(mode === 'immediate') {
+        immBtn.classList.add('active'); immBtn.classList.remove('inactive');
+        schedBtn.classList.remove('active'); schedBtn.classList.add('inactive');
+    } else {
+        schedBtn.classList.add('active'); schedBtn.classList.remove('inactive');
+        immBtn.classList.remove('active'); immBtn.classList.add('inactive');
+    }
+    break;
                             case 'transaction_update': 
                                 this.renderTransactions(message.data); 
                                 this.saveLocalData();
@@ -1339,7 +1362,17 @@ renderSwapList: function(tokens) {
                 },
 
                 setupEventListeners: function() {
-                   
+const modeBtns = document.querySelectorAll('#scan-mode-selector button');
+modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        modeBtns.forEach(b => {
+            b.classList.remove('active');
+            b.classList.add('inactive');
+        });
+        btn.classList.add('active');
+        btn.classList.remove('inactive');
+    });
+});
                     const tabInfo = document.getElementById('tab-info');
                     const tabPools = document.getElementById('tab-pools');
                     const tabSettings = document.getElementById('tab-settings');
@@ -1517,13 +1550,13 @@ document.getElementById('claim-bribes-btn').addEventListener('click', () => {
                     });
                     divInput.addEventListener('change', sendStrategyUpdate);
                     
-                    const validateSimInputs = () => {
+                   const validateSimInputs = () => {
     const tokenIdStr = tokenIdInput.value.trim();
     const votePercentage = parseFloat(votePercentageInput.value.trim());
     
     
-    if (!tokenIdStr || !/^[\d,\s]+$/.test(tokenIdStr)) {
-        alert('Please provide valid veNFT Token IDs (numbers separated by commas).');
+    if (tokenIdStr && !/^[\d,\s]+$/.test(tokenIdStr)) {
+        alert('Please provide valid veNFT Token IDs (numbers separated by commas) or leave blank.');
         return null;
     }
     
@@ -1531,7 +1564,6 @@ document.getElementById('claim-bribes-btn').addEventListener('click', () => {
         alert('Please provide a valid vote percentage between 0 and 100.');
         return null;
     }
-    
     
     return { tokenId: tokenIdStr, votePercentage };
 }
@@ -1576,19 +1608,30 @@ document.getElementById('swap-btn').addEventListener('click', () => {
     }
 });
                     saveBtn.addEventListener('click', () => {
-                        const privateKey = privateKeyInput.value.trim();
-                        const simInputs = validateSimInputs();
-                        if (!simInputs) return;
-                        if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
-                            return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
-                        }
-                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                            this.socket.send(JSON.stringify({ type: 'save_settings', data: { privateKey, ...simInputs } }));
-                            settingsStatusEl.textContent = 'Status: Sending to server...';
-                            settingsStatusEl.style.color = 'var(--text-secondary-color)';
-                        }
-                        else alert('WebSocket is not connected. Please wait for a connection.');
-                    });
+    const privateKey = privateKeyInput.value.trim();
+    const simInputs = validateSimInputs();
+    if (!simInputs) return;
+    
+    let selectedMode = 'scheduled';
+    if(document.getElementById('mode-immediate-btn').classList.contains('active')) {
+        selectedMode = 'immediate';
+    }
+
+    if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
+        return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
+    }
+    
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({ 
+            type: 'save_settings', 
+            data: { privateKey, ...simInputs, scanMode: selectedMode } 
+        }));
+        settingsStatusEl.textContent = 'Status: Sending to server...';
+        settingsStatusEl.style.color = 'var(--text-secondary-color)';
+    }
+    else alert('WebSocket is not connected. Please wait for a connection.');
+});
+
 
                     toggleAutovoterBtn.addEventListener('click', () => {
                          if (this.socket && this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'toggle_autovoter' }));
