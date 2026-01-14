@@ -417,8 +417,8 @@ async function executeVote() {
                 const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
                 const weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
                 const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
+                const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
 
-               
                 console.log(`Voting with Token ID ${tokenId}...`);
                 const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution);
                 
@@ -878,7 +878,6 @@ const runAutoSequence = async () => {
                 }
             }
             else if (parsed.type === 'cast_manual_vote') {
-                startMainLoopOnce();
                 const { votes } = parsed.data;
                 try {
                     ws.send(JSON.stringify({ type: 'vote_status', success: true, message: "Processing manual vote..." }));
@@ -1068,7 +1067,6 @@ const runAutoSequence = async () => {
                 }
             }
             else if (parsed.type === 'simulate_vote') {
-                startMainLoopOnce();
                 try {
                     const { tokenId, votePercentage } = parsed.data;
                     console.log(`Running simulation for Token ID: ${tokenId}`);
