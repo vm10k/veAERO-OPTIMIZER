@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "https://rpc.ankr.com/base/f2e65ac303fcd581edf8efd92fc78a0b0c2021ced1626fdf6bb6f0e8ce0b3cef",
+    rpcUrl: "https://base.meowrpc.com",
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -1735,3 +1735,4 @@ loadSettings();
 loadTransactions();
 loadEpochHistory();
 startScheduledScan();
+
