@@ -9,8 +9,8 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "https://base.meowrpc.com",
-    voteLeadTime: 60, // last min before epoch flip
+    rpcUrl: "https://rpc.ankr.com/base/f2e65ac303fcd581edf8efd92fc78a0b0c2021ced1626fdf6bb6f0e8ce0b3cef",
+    voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
     minterAddress: "0xeb018363f0a9af8f91f06fee6613a751b2a33fe5",
@@ -1603,50 +1603,89 @@ async function performClaimBribes(signer, tokenIds, pools) {
 }
 
 // =================================================================================
-// --- MAIN EXECUTION LOOP ---
+// --- MAIN EXECUTION LOOP (SNIPER MODE) ---
 // =================================================================================
+
+let sniperTimer = null; // Timer for the specific last-minute shot
+let nextLoopTimer = null; // Timer for the next cycle
+
 async function mainLoop() {
     if (isFetching) {
-        console.log("Data fetch already in progress. Skipping cycle.");
+        console.log("⚠️ Data fetch already in progress. Skipping cycle.");
         return;
     }
     isFetching = true;
+
     try {
+        console.log("🔄 Starting Data Fetch (This may take time)...");
         const fetchedData = await fetchData();
+        
         if (fetchedData) {
             latestFetchedData = fetchedData;
             broadcast({ type: 'summary', data: fetchedData.summary });
             broadcast({ type: 'pools', data: fetchedData.pools });
-            broadcast({ type: 'status', message: `Update complete. Next update in 5 minutes.` });
+            broadcast({ type: 'status', message: `Update complete.` });
 
             await trackEpochPerformance(fetchedData.summary, fetchedData.pools);
 
             const { epochVoteEnd } = fetchedData.summary;
-            if (epochVoteEnd) {
+            
+            if (epochVoteEnd && autovoterConfig.enabled) {
                 const now = Math.floor(Date.now() / 1000);
                 const timeUntilEnd = epochVoteEnd - now;
                 const currentEpochStart = epochVoteEnd - (7 * 24 * 60 * 60);
 
-                if (autovoterConfig.enabled && timeUntilEnd > 0 && timeUntilEnd <= config.voteLeadTime && lastEpochVoted !== currentEpochStart) {
-                    await executeVote();
+                const targetLeadTime = config.voteLeadTime || 60;
+                const timeUntilSnipe = timeUntilEnd - targetLeadTime; 
+
+                console.log(`⏱️ Epoch ends in ${(timeUntilEnd/60).toFixed(2)} minutes.`);
+
+               
+                if (timeUntilEnd > 0 && timeUntilEnd <= targetLeadTime) {
+                     if (lastEpochVoted !== currentEpochStart) {
+                        console.log("🚀 INSIDE VOTE WINDOW! Executing IMMEDIATELY.");
+                        await executeVote();
+                     }
+                }
+                           
+                else if (timeUntilEnd > 0 && timeUntilEnd < 900) {
+                    console.log(`🎯 SNIPER MODE: Stopping loops. Waiting ${timeUntilSnipe}s to snipe...`);
+                    broadcast({ type: 'status', message: `Waiting ${timeUntilSnipe}s to vote...` });
+                    
+                    if (sniperTimer) clearTimeout(sniperTimer);
+                    if (nextLoopTimer) clearTimeout(nextLoopTimer);
+
+                    sniperTimer = setTimeout(async () => {
+                        console.log("⚡ SNIPER TIMER FIRED: Executing Vote...");
+                        if (lastEpochVoted !== currentEpochStart) {
+                            await executeVote();
+                        }
+                    }, timeUntilSnipe * 1000);
+
+                    return; 
                 }
             }
         }
-    } catch (error) { console.error("Error in main loop:", error); }
-    finally { isFetching = false; }
+    } catch (error) { 
+        console.error("Error in main loop:", error); 
+    } finally { 
+        isFetching = false; 
+        
+        if (!sniperTimer) {
+            console.log(`💤 Sleeping for ${config.fetchInterval / 60000} mins...`);
+            nextLoopTimer = setTimeout(mainLoop, config.fetchInterval);
+        }
+    }
 }
 
 async function startScheduledScan() {
     if (isLoopRunning) return;
+    
     if (autovoterConfig.scanMode === 'immediate') {
         console.log("\n=== IMMEDIATE MODE ACTIVATED ===");
-        console.log("Skipping Epoch Timer. Starting scan loop now...");
-        
         broadcast({ type: 'status', message: `Immediate Mode: Scanning now...` });
-        
         isLoopRunning = true;
-        await mainLoop(); 
-        setInterval(mainLoop, config.fetchInterval); 
+        mainLoop(); 
         return;
     }
 
@@ -1654,15 +1693,13 @@ async function startScheduledScan() {
 
     try {
         const currentTimestamp = Math.floor(Date.now() / 1000);
-        
         let epochEnd = await voterContract.epochVoteEnd(currentTimestamp);
         
-        const LEAD_TIME = 900; 
+        const LEAD_TIME = 900; // 15 Minutes 
         
         let targetTimestamp = Number(epochEnd) - LEAD_TIME;
         let delayMs = (targetTimestamp - currentTimestamp) * 1000;
 
-        
         if (delayMs <= 0) {
             console.log("Info: Previous window passed. Calculating for NEXT Epoch...");
             targetTimestamp += (7 * 24 * 60 * 60); 
@@ -1677,18 +1714,15 @@ async function startScheduledScan() {
         console.log(`Status:          Sleeping for ${hoursToWait} hours.`);
         console.log(`====================\n`);
 
-        
         setTimeout(() => {
             broadcast({ type: 'status', message: `Standby. Scanning starts in ${hoursToWait} hours.` });
             broadcast({ type: 'scanning_progress', data: { scanned: 0, total: 0, active: 0 } });
         }, 2000);
 
-        
         setTimeout(() => {
             console.log("⏰ WAKE UP! Starting heavy scanning sequence...");
             isLoopRunning = true;
             mainLoop(); 
-            setInterval(mainLoop, config.fetchInterval); 
         }, delayMs);
 
     } catch (e) {
