@@ -1,5 +1,5 @@
 # veAERO Yield Optimizer (Self-Hosted Dashboard)
-**keep up with code updates at discord channel linked in end of the repo**
+**keep up with the code updates at discord channel linked in end of the repo**
 
 **Consider it aerodrome at home. // the voting page section but running locally with many other features**
 
