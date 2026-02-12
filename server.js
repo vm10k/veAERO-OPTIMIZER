@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "GET FREEUMUIM RPC FROM ALCHEMY OR ANKR, ETC",
+    rpcUrl: "PUT YOUR RPC HERE",
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -303,19 +303,32 @@ Final APR:     ${epochHistory[targetEpochId].userApr}%
 // =================================================================================
 // --- AUTO-VOTER LOGIC ---
 // =================================================================================
-async function getProjectedVoteOutcome(tokenId, votePercentage) {
-    if (!tokenId || isNaN(parseFloat(votePercentage))) {
+async function getProjectedVoteOutcome(tokenIdsInput, votePercentage) {
+    if (!tokenIdsInput || isNaN(parseFloat(votePercentage))) {
         throw new Error("Invalid token ID or vote percentage for simulation.");
     }
     if (!latestFetchedData.pools || latestFetchedData.pools.length === 0) {
         throw new Error("Pool data not yet available for simulation. Please wait for the initial scan to complete.");
     }
 
-    const currentTimestamp = Math.floor(Date.now() / 1000);
-    const userVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
+    const ids = typeof tokenIdsInput === 'string' 
+        ? tokenIdsInput.split(',').map(id => id.trim()).filter(id => id !== '')
+        : [tokenIdsInput];
 
-    if (userVotingPower === 0n) {
-        throw new Error(`Token ID ${tokenId} has zero voting power.`);
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    let totalUserVotingPower = 0n;
+
+    for (const id of ids) {
+        try {
+            const power = await veNftContract.balanceOfNFTAt(id, currentTimestamp);
+            totalUserVotingPower += power;
+        } catch (e) {
+            console.warn(`Simulation: Could not fetch power for ID ${id}. Skipping.`);
+        }
+    }
+
+    if (totalUserVotingPower === 0n) {
+        throw new Error(`The provided Token IDs have zero total voting power.`);
     }
 
     const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
@@ -325,7 +338,7 @@ async function getProjectedVoteOutcome(tokenId, votePercentage) {
     }
 
     const percentageAsInteger = BigInt(Math.round(votePercentage * 100));
-    const userVoteWeight = (userVotingPower * percentageAsInteger) / 10000n;
+    const userVoteWeight = (totalUserVotingPower * percentageAsInteger) / 10000n;
     const userVoteWeightEther = Number(ethers.formatEther(userVoteWeight));
     const userVoteValueUSD = userVoteWeightEther * aeroPrice;
 
@@ -333,8 +346,10 @@ async function getProjectedVoteOutcome(tokenId, votePercentage) {
         const totalRewardsUSD = pool.totalFeesUSD + pool.totalBribesUSD;
         const newTotalPoolPower = BigInt(pool.votingPower) + userVoteWeight;
         const newTotalPoolPowerEther = Number(ethers.formatEther(newTotalPoolPower));
+        
         const userShare = (newTotalPoolPowerEther > 0) ? userVoteWeightEther / newTotalPoolPowerEther : 0;
         const projectedUserWeeklyRewards = totalRewardsUSD * userShare;
+        
         const projectedAPR = (userVoteValueUSD > 0) ? (projectedUserWeeklyRewards / userVoteValueUSD) * 52 * 100 : 0;
 
         return { ...pool, projectedAPR, projectedUserWeeklyRewards };
@@ -343,7 +358,6 @@ async function getProjectedVoteOutcome(tokenId, votePercentage) {
     simulatedPools.sort((a, b) => b.projectedAPR - a.projectedAPR);
     return simulatedPools;
 }
-
 async function findOptimalDiversification(sortedPools, userVoteWeight) {
     let bestSetup = { poolCount: 0, totalRewards: 0, pools: [] };
 
@@ -1370,7 +1384,7 @@ async function fetchData(specificPoolAddresses = null) {
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 5;  // change that according to the RPC limits
+        const batchSize = 4; 
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
@@ -1832,4 +1846,3 @@ loadSettings();
 loadTransactions();
 loadEpochHistory();
 startContinuousScanner();
-
