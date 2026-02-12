@@ -1370,7 +1370,7 @@ async function fetchData(specificPoolAddresses = null) {
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 7; 
+        const batchSize = 5;  // change that according to the RPC limits
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
@@ -1832,3 +1832,4 @@ loadSettings();
 loadTransactions();
 loadEpochHistory();
 startContinuousScanner();
+
