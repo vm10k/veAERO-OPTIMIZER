@@ -53,13 +53,13 @@ In an era of frequent **DNS hijacks**, **frontend exploits**, and **phishing dom
     ```
     *This installs `ethers`, `ws` (WebSocket), and other necessary libraries.*
  Required Setup for this change
-To make the code above work, you must do two small things:
-A. Install the dotenv package
-Run this in your terminal:
-npm install dotenv
-C. Create a .env file
-Create a new file in your project folder named exactly .env (no filename, just the extension) and paste your key there:
-PRIVATE_KEY=your_private_key_here
+* To make the code above work, you must do two small things:
+* A. Install the dotenv package
+* Run this in your terminal:
+* npm install dotenv
+* B. Create a .env file
+* Create a new file in your project folder named exactly .env (no filename, just the extension) and paste your key there:
+* PRIVATE_KEY=your_private_key_here
 4.  **Start the Server:**
     Run the backend logic:
     ```bash
