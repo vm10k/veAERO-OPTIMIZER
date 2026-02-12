@@ -1,7 +1,7 @@
+require('dotenv').config();
 const { ethers } = require("ethers");
 const WebSocket = require('ws');
 const fs = require('fs');
-
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // =================================================================================
@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "https://base.meowrpc.com",
+    rpcUrl: "GET FREEUMUIM RPC FROM ALCHEMY OR ANKR, ETC",
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -21,7 +21,14 @@ const provider = new ethers.JsonRpcProvider(config.rpcUrl);
 const settingsFilePath = './settings.json';
 const transactionsFilePath = './transactions.json';
 const epochsFilePath = './epochs.json';
-
+function getSafeConfig() {
+    const { privateKey, signer, ...safeConfig } = autovoterConfig;
+    return { 
+        ...safeConfig, 
+        hasWallet: !!signer,
+        privateKey: undefined 
+    };
+}
 // =================================================================================
 // --- ABI DEFINITIONS ---
 // =================================================================================
@@ -102,26 +109,29 @@ function loadSettings() {
             autovoterConfig.enabled = savedSettings.enabled || false;
             autovoterConfig.voteStrategy = savedSettings.voteStrategy || 'optimized';
             autovoterConfig.diversificationPools = savedSettings.diversificationPools || 3;
-			autovoterConfig.scanMode = savedSettings.scanMode || 'scheduled'; 
+            autovoterConfig.scanMode = savedSettings.scanMode || 'scheduled'; 
             
-            if (savedSettings.privateKey) {
-                try {
-                    autovoterConfig.privateKey = savedSettings.privateKey;
-                    autovoterConfig.signer = new ethers.Wallet(savedSettings.privateKey, provider);
-                    console.log(`Restored wallet session: ${autovoterConfig.signer.address}`);
-                    
-                    
-                    if (!autovoterConfig.tokenIds.length && autovoterConfig.tokenId) {
-                        autovoterConfig.tokenIds = [autovoterConfig.tokenId];
-                    }
-                } catch (e) {
-                    console.error("Failed to restore wallet from saved private key:", e.message);
-                }
-            }
-            
-
-            console.log("Loaded settings from settings.json");
+            console.log("Loaded general settings from settings.json");
         }
+
+        const secretKey = process.env.PRIVATE_KEY;
+
+        if (secretKey) {
+            try {
+                autovoterConfig.privateKey = secretKey;
+                autovoterConfig.signer = new ethers.Wallet(secretKey, provider);
+                console.log(`Wallet initialized securely: ${autovoterConfig.signer.address}`);
+                
+                if (!autovoterConfig.tokenIds.length && autovoterConfig.tokenId) {
+                    autovoterConfig.tokenIds = [autovoterConfig.tokenId];
+                }
+            } catch (e) {
+                console.error("Failed to initialize wallet from PRIVATE_KEY in .env:", e.message);
+            }
+        } else {
+            console.warn("⚠️ WARNING: No PRIVATE_KEY found in .env file. Bot is in Watch-Only mode.");
+        }
+
     } catch (error) {
         console.error("Could not load settings:", error);
     }
@@ -195,70 +205,104 @@ async function trackEpochPerformance(summary, pools) {
     const AERODROME_START = 1693353600;
     const epochDuration = 604800;
     const currentEpochId = Math.floor((summary.epochVoteEnd - AERODROME_START) / epochDuration);
+    
+    const previousEpochId = currentEpochId - 1;
 
     let indexApr = 0;
     const validPools = pools.filter(p => p.tvl >= 100000);
     const sortedPools = [...validPools].sort((a, b) => b.totalAPR - a.totalAPR);
-
     const top3 = sortedPools.slice(0, 3);
     if (top3.length > 0) {
         indexApr = top3.reduce((sum, p) => sum + p.totalAPR, 0) / top3.length;
     }
 
-    let userApr = 0;
-    let earningsThisEpoch = 0;
-    let userPower = 0;
-
-    if (autovoterConfig.tokenId) {
-        try {
-            const now = Math.floor(Date.now() / 1000);
-            const rawPower = await veNftContract.balanceOfNFTAt(autovoterConfig.tokenId, now);
-            userPower = parseFloat(ethers.formatEther(rawPower));
-        } catch (e) { }
+    if (!epochHistory[currentEpochId]) {
+        epochHistory[currentEpochId] = {
+            epochId: currentEpochId,
+            indexApr: parseFloat(indexApr.toFixed(2)),
+            userApr: 0,
+            earnings: 0,
+            poolsVoted: 0,
+            timestamp: Date.now()
+        };
+    } else {
+        epochHistory[currentEpochId].indexApr = parseFloat(indexApr.toFixed(2));
     }
 
-    const epochStartTs = (summary.epochVoteEnd - epochDuration) * 1000;
-    const epochEndTs = summary.epochVoteEnd * 1000;
+    saveEpochHistory();
+    broadcast({ type: 'epoch_history_update', data: epochHistory });
+}
+async function recordRealizedEarnings(usdAmount) {
+    if (usdAmount <= 0) return;
 
-    const epochTx = transactionHistory.filter(tx =>
-        tx.timestamp >= epochStartTs &&
-        tx.timestamp < epochEndTs &&
-        (tx.status === 'Confirmed' || tx.status === 'Success')
-    );
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const AERODROME_START = 1693353600;
+    const epochDuration = 604800; 
+    
+    const targetEpochId = Math.floor((currentTimestamp - AERODROME_START) / epochDuration) - 1;
+if (!latestFetchedData.prices || Object.keys(latestFetchedData.prices).length === 0) {
+        console.error("[ANALYSIS] Prices not loaded yet. Skipping historical recording.");
+        return;
+    }
+    if (!epochHistory[targetEpochId]) {
+        epochHistory[targetEpochId] = { 
+            epochId: targetEpochId, 
+            indexApr: 0, 
+            userApr: 0, 
+            earnings: 0, 
+            timestamp: Date.now() 
+        };
+    }
 
-    earningsThisEpoch = epochTx.reduce((sum, tx) => sum + (tx.value || 0), 0);
+    epochHistory[targetEpochId].earnings += usdAmount;
 
-    let uniquePools = new Set();
-    epochTx.forEach(tx => {
-        if (Array.isArray(tx.pools)) tx.pools.forEach(p => uniquePools.add(p));
-        else uniquePools.add(tx.pools);
-    });
+    let totalUserPower = 0;
+    
+    const idsToCheck = [...autovoterConfig.tokenIds];
+    if (autovoterConfig.tokenId && !idsToCheck.includes(autovoterConfig.tokenId)) {
+        idsToCheck.push(autovoterConfig.tokenId);
+    }
+
+    for (const id of idsToCheck) {
+        try {
+            
+            const historicalTime = currentTimestamp - (epochDuration / 2);
+            const rawPower = await veNftContract.balanceOfNFTAt(id, historicalTime);
+            totalUserPower += parseFloat(ethers.formatEther(rawPower));
+        } catch (e) {
+            console.error(`[ANALYSIS ERROR] Failed to fetch historical power for NFT ${id}:`, e.message);
+        }
+    }
 
     const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
     const aeroPrice = latestFetchedData.prices[AERO_ADDRESS] || 0;
-    const powerValueUsd = userPower * aeroPrice;
+    const totalPowerValueUsd = totalUserPower * aeroPrice;
 
-    if (powerValueUsd > 0 && earningsThisEpoch > 0) {
-        userApr = (earningsThisEpoch / powerValueUsd) * 52 * 100;
+    if (totalPowerValueUsd > 0) {
+        const calculatedApr = (epochHistory[targetEpochId].earnings / totalPowerValueUsd) * 52 * 100;
+        epochHistory[targetEpochId].userApr = parseFloat(calculatedApr.toFixed(2));
     }
 
-    epochHistory[currentEpochId] = {
-        epochId: currentEpochId,
-        indexApr: parseFloat(indexApr.toFixed(2)),
-        userApr: parseFloat(userApr.toFixed(2)),
-        earnings: parseFloat(earningsThisEpoch.toFixed(2)),
-        poolsVoted: uniquePools.size,
-        timestamp: Date.now()
-    };
+    console.log(`
+==================================================
+💰 REALIZED EARNINGS RECORDED
+--------------------------------------------------
+Epoch ID:      ${targetEpochId}
+Amount Added:  $${usdAmount.toFixed(2)}
+Total Epoch:   $${epochHistory[targetEpochId].earnings.toFixed(2)}
+Total Power:   ${totalUserPower.toFixed(2)} veAERO ($${totalPowerValueUsd.toFixed(2)})
+Final APR:     ${epochHistory[targetEpochId].userApr}%
+==================================================
+    `);
 
     saveEpochHistory();
     broadcast({ type: 'epoch_history_update', data: epochHistory });
 }
 
+
 // =================================================================================
 // --- AUTO-VOTER LOGIC ---
 // =================================================================================
-
 async function getProjectedVoteOutcome(tokenId, votePercentage) {
     if (!tokenId || isNaN(parseFloat(votePercentage))) {
         throw new Error("Invalid token ID or vote percentage for simulation.");
@@ -445,8 +489,6 @@ async function executeVote() {
         
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
 		
-        await trackEpochPerformance(latestFetchedData.summary, latestFetchedData.pools);
-
     } catch (error) {
         console.error("VOTE EXECUTION FAILED:", error);
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
@@ -552,8 +594,6 @@ async function executeTestVote(poolAddress) {
 // =================================================================================
 // --- WALLET SCANNING & ODOS SWAP ---
 // =================================================================================
-
-
 async function scanWalletBalances(userAddress) {
     if (!userAddress) return [];
     console.log(`Scanning balances for ${userAddress}...`);
@@ -656,7 +696,7 @@ async function executeOdosSwap(inputTokens, outputTokenAddress) {
 
             
             const quoteBody = {
-                chainId: 8453, // Base Chain ID
+                chainId: 8453, 
                 inputTokens: [{ tokenAddress: token.address, amount: inputAmount }],
                 outputTokens: [{ tokenAddress: outputTokenAddress, proportion: 1 }],
                 userAddr: userAddress,
@@ -730,9 +770,7 @@ wss.on('connection', ws => {
         privateKey: "" 
     };
 
-    ws.send(JSON.stringify({ type: 'autovoter_config_status', data: uiConfig }));
-	
-    ws.send(JSON.stringify({ type: 'autovoter_config_status', data: autovoterConfig }));
+ws.send(JSON.stringify({ type: 'autovoter_config_status', data: getSafeConfig() }));
     ws.send(JSON.stringify({ type: 'epoch_history_update', data: epochHistory }));
 
     ws.on('close', () => console.log('Client disconnected.'));
@@ -743,53 +781,57 @@ wss.on('connection', ws => {
             const bigIntReplacer = (key, value) => typeof value === 'bigint' ? value.toString() : value;
 
             const saveCurrentSettings = () => {
-                try {
-                    const { signer, ...settingsToSave } = autovoterConfig;
-                    fs.writeFileSync(settingsFilePath, JSON.stringify(settingsToSave, null, 2), 'utf8');
-                    console.log("Settings saved to settings.json");
-                } catch (error) {
-                    console.error("Error saving settings:", error);
-                }
-            };
+    try {
+        const { signer, privateKey, ...settingsToSave } = autovoterConfig;
+        
+        fs.writeFileSync(settingsFilePath, JSON.stringify(settingsToSave, null, 2), 'utf8');
+        console.log("Settings saved to settings.json (Private Key excluded)");
+    } catch (error) {
+        console.error("Error saving settings:", error);
+    }
+};
 
 if (parsed.type === 'save_settings') {
     const { privateKey, tokenId, votePercentage, scanMode } = parsed.data; 
 
     try {
         const percent = parseFloat(votePercentage);
-        if (isNaN(percent) || percent < 0 || percent > 100) throw new Error("Invalid percentage.");
+        if (isNaN(percent) || percent < 0 || percent > 100) throw new Error("Invalid percentage.");       
+        if (privateKey && privateKey.trim() !== "") {
+            try {
+                const wallet = new ethers.Wallet(privateKey, provider);
+                autovoterConfig.privateKey = privateKey;
+                autovoterConfig.signer = wallet;
+                console.log(`Wallet updated via UI: ${wallet.address}`);
+            } catch (e) {
+                throw new Error("The provided Private Key is invalid.");
+            }
+        }
 
-        const wallet = privateKey ? new ethers.Wallet(privateKey, provider) : null;
-        
-        
         const ids = tokenId.toString().split(',').map(id => id.trim()).filter(id => id !== '');
-        
-       
-        
-        autovoterConfig.privateKey = privateKey;
-        autovoterConfig.signer = wallet;
         autovoterConfig.tokenIds = ids; 
         autovoterConfig.tokenId = ids.length > 0 ? ids[0] : null; 
         autovoterConfig.votePercentage = percent;
         autovoterConfig.scanMode = scanMode || 'scheduled';
 
         const statusMsg = ids.length > 0 
-            ? `Bot configured for ${ids.length} NFTs.` 
-            : `Bot configured in Watch-Only mode (No IDs).`;
+            ? `Settings saved for ${ids.length} NFTs.` 
+            : `Settings saved (Watch-Only mode).`;
 
         console.log(`${statusMsg} Mode: ${autovoterConfig.scanMode}`);
+        
         saveCurrentSettings(); 
         
-        ws.send(JSON.stringify({ type: 'settings_response', success: true, message: `${statusMsg} Mode: ${autovoterConfig.scanMode}` }));
+        ws.send(JSON.stringify({ 
+            type: 'settings_response', 
+            success: true, 
+            message: statusMsg + " (Note: Update .env for permanent key storage)" 
+        }));
 
-        
-        if (autovoterConfig.scanMode === 'immediate') {
-            startScheduledScan(); 
-        }
+        broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
 
     } catch (e) {
-        autovoterConfig.signer = null;
-        const errorMessage = e.message.toLowerCase().includes("private key") ? 'Error: Invalid private key.' : `Error: ${e.message}`;
+        const errorMessage = `Error: ${e.message}`;
         ws.send(JSON.stringify({ type: 'settings_response', success: false, message: errorMessage }));
     }
 }
@@ -888,158 +930,166 @@ const runAutoSequence = async () => {
                 }
             }
           else if (parsed.type === 'claim_rebase') {
-                if (!autovoterConfig.signer || !autovoterConfig.tokenId) {
+                if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
                     return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Configure Bot first.' }));
                 }
+
                 try {
-                    
                     const AERO_ADDRESS = "0x940181a94A35A4569E4529A3CDfB74e38FD98631";
-                    const aeroContract = new ethers.Contract(AERO_ADDRESS, ["function balanceOf(address) view returns (uint256)", "function approve(address,uint256)"], provider);
+                    const aeroPrice = latestFetchedData.prices[AERO_ADDRESS.toLowerCase()] || 0;
                     
-                   
-                    const amountToClaim = await distributorContract.claimable(autovoterConfig.tokenId);
-                    if (amountToClaim === 0n) {
-                         return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Nothing to claim (Calculated 0).' }));
-                    }
-
-                   
-                    const distributorBalance = await aeroContract.balanceOf(config.distributorAddress);
-                    if (distributorBalance < amountToClaim) {
-                        return ws.send(JSON.stringify({ 
-                            type: 'rewards_tx_result', 
-                            success: false, 
-                            message: `Distribution Pending: Contract has insufficient AERO. Wait for Epoch distribution.` 
-                        }));
-                    }
-
-                   
+                    const aeroContract = new ethers.Contract(AERO_ADDRESS, ["function balanceOf(address) view returns (uint256)", "function approve(address,uint256)"], autovoterConfig.signer);
                     const distWithSigner = distributorContract.connect(autovoterConfig.signer);
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Claiming ${ethers.formatEther(amountToClaim)} AERO...` }));
-                    
-                    
-                    const claimTx = await distWithSigner.claim(autovoterConfig.tokenId, { gasLimit: 600000 });
-                    await claimTx.wait();
-                    
-                   
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: 'Claim Confirmed. Locking (Compounding)...' }));
-                    
-                    const aeroWithSigner = aeroContract.connect(autovoterConfig.signer);
-                    const walletBalance = await aeroContract.balanceOf(autovoterConfig.signer.address);
+                    const veNftWithSigner = veNftContract.connect(autovoterConfig.signer);
 
-                    if (walletBalance > 0n) {
-                       
-                        const approveTx = await aeroWithSigner.approve(config.veNftAddress, walletBalance);
-                        await approveTx.wait();
+                    let totalClaimedUSD = 0;
+                    let claimPerformed = false;
 
-                       
-                        const veNftWithSigner = veNftContract.connect(autovoterConfig.signer);
-                        const lockTx = await veNftWithSigner.increaseAmount(autovoterConfig.tokenId, walletBalance);
-                        await lockTx.wait();
-                        
-                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: 'Rebase Successfully Claimed & Locked!' }));
-                    } else {
-                         ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: 'Claim successful' }));
+                    for (const id of autovoterConfig.tokenIds) {
+                        const amountToClaim = await distributorContract.claimable(id);
+                        if (amountToClaim > 0n) {
+                            claimPerformed = true;
+                            ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Claiming rebase for ID ${id}...` }));
+                            
+                            await (await distWithSigner.claim(id, { gasLimit: 500000 })).wait();
+
+                            totalClaimedUSD += (parseFloat(ethers.formatEther(amountToClaim)) * aeroPrice);
+
+                            const walletBalance = await aeroContract.balanceOf(autovoterConfig.signer.address);
+                            if (walletBalance > 0n) {
+                                await (await aeroContract.approve(config.veNftAddress, walletBalance)).wait();
+                                await (await veNftWithSigner.increaseAmount(id, walletBalance)).wait();
+                            }
+                        }
                     }
 
+                    if (claimPerformed) {
+                        if (totalClaimedUSD > 0) await recordRealizedEarnings(totalClaimedUSD);
+                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Successfully Claimed & Locked Rebases! ($${totalClaimedUSD.toFixed(2)})` }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Nothing to claim (Calculated 0).' }));
+                    }
                 } catch (e) {
-                    console.error("Rebase Error:", e);
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: `Action Failed: ${e.reason || e.message}` }));
+                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: `Action Failed: ${e.message}` }));
                 }
             }
           else if (parsed.type === 'claim_bribes') {
-                if (!autovoterConfig.signer || !autovoterConfig.tokenId) {
+                if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
                     return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Configure Bot first.' }));
                 }
-                try {
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: '🔍 Scanning your specific rewards...' }));
 
-                   
+                try {
+                    if (!latestFetchedData.pools || latestFetchedData.pools.length === 0) {
+                        ws.send(JSON.stringify({ type: 'status', message: '⚠️ Fetching fresh pool data...' }));
+                        const freshData = await fetchData();
+                        if (freshData) {
+                            latestFetchedData = freshData;
+                        } else {
+                            throw new Error("Failed to fetch pool data from blockchain.");
+                        }
+                    }
+
+                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: '🔍 Scanning gauges for earned rewards...' }));
+
                     const bribeAddresses = [];
                     const bribeTokens = [];
                     const feeAddresses = [];
                     const feeTokens = [];
+                    let totalRealizedUSD = 0;
 
-                    let foundAny = false;
-
-                    
                     for (const pool of latestFetchedData.pools) {
-                        
-                       
-                        if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress && pool.fees) {
+                        if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress) {
                             const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, provider);
-                            const tokensToClaim = [];
-
+                            const tokensFound = [];
                             const potentialTokens = Object.keys(pool.fees);
-                            for (const tokenAddr of potentialTokens) {
-                                try {
-                                    
-                                    const earned = await contract.earned(tokenAddr, autovoterConfig.tokenId);
-                                    if (earned > 0n) {
-                                        tokensToClaim.push(tokenAddr);
-                                        console.log(`Found Fee: ${pool.name} -> ${tokenAddr} = ${earned}`);
-                                    }
-                                } catch(e) {}
-                            }
 
-                            if (tokensToClaim.length > 0) {
+                            for (const tAddr of potentialTokens) {
+                                for (const tid of autovoterConfig.tokenIds) {
+                                    try {
+                                        const earned = await contract.earned(tAddr, tid);
+                                        if (earned > 0n) {
+                                            if (!tokensFound.includes(tAddr)) tokensFound.push(tAddr);
+                                            
+                                            const price = latestFetchedData.prices[tAddr.toLowerCase()] || 0;
+                                            const decimals = pool.fees[tAddr.toLowerCase()]?.decimals || 18;
+                                            totalRealizedUSD += (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                        }
+                                    } catch (e) {}
+                                }
+                            }
+                            if (tokensFound.length > 0) {
                                 feeAddresses.push(pool.feeAddress);
-                                feeTokens.push(tokensToClaim);
-                                foundAny = true;
+                                feeTokens.push(tokensFound);
                             }
                         }
 
-                       
-                        if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress && pool.bribes) {
+                        if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress) {
                             const contract = new ethers.Contract(pool.bribeAddress, abi.rewardContract, provider);
-                            const tokensToClaim = [];
-
+                            const tokensFound = [];
                             const potentialTokens = Object.keys(pool.bribes);
-                            for (const tokenAddr of potentialTokens) {
-                                try {
-                                    
-                                    const earned = await contract.earned(tokenAddr, autovoterConfig.tokenId);
-                                    if (earned > 0n) {
-                                        tokensToClaim.push(tokenAddr);
-                                        console.log(`Found Bribe: ${pool.name} -> ${tokenAddr} = ${earned}`);
-                                    }
-                                } catch(e) {}
-                            }
 
-                            if (tokensToClaim.length > 0) {
+                            for (const tAddr of potentialTokens) {
+                                for (const tid of autovoterConfig.tokenIds) {
+                                    try {
+                                        const earned = await contract.earned(tAddr, tid);
+                                        if (earned > 0n) {
+                                            if (!tokensFound.includes(tAddr)) tokensFound.push(tAddr);
+
+                                            const price = latestFetchedData.prices[tAddr.toLowerCase()] || 0;
+                                            const decimals = pool.bribes[tAddr.toLowerCase()]?.decimals || 18;
+                                            totalRealizedUSD += (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                        }
+                                    } catch (e) {}
+                                }
+                            }
+                            if (tokensFound.length > 0) {
                                 bribeAddresses.push(pool.bribeAddress);
-                                bribeTokens.push(tokensToClaim);
-                                foundAny = true;
+                                bribeTokens.push(tokensFound);
                             }
                         }
                     }
 
-                    if (!foundAny) {
-                        return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Checked all pools: No rewards earned.' }));
+                    if (feeAddresses.length === 0 && bribeAddresses.length === 0) {
+                        return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'No rewards found in any voted gauges.' }));
                     }
 
                     const voterWithSigner = voterContract.connect(autovoterConfig.signer);
                     let resultMsg = "";
 
-                   
-                    if (bribeAddresses.length > 0) {
-                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Claiming Bribes from ${bribeAddresses.length} pools...` }));
-                        const tx = await voterWithSigner.claimBribes(bribeAddresses, bribeTokens, autovoterConfig.tokenId);
-                        await tx.wait();
-                        resultMsg += "Bribes Claimed. ";
+                    for (const id of autovoterConfig.tokenIds) {
+                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Sending claim for ID ${id}...` }));
+
+                        if (bribeAddresses.length > 0) {
+                            const tx = await voterWithSigner.claimBribes(bribeAddresses, bribeTokens, id);
+                            await tx.wait();
+                            resultMsg += `ID ${id} Bribes `;
+                        }
+
+                        if (feeAddresses.length > 0) {
+                            const tx = await voterWithSigner.claimFees(feeAddresses, feeTokens, id);
+                            await tx.wait();
+                            resultMsg += `ID ${id} Fees `;
+                        }
                     }
 
-                    if (feeAddresses.length > 0) {
-                        ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Claiming Fees from ${feeAddresses.length} pools...` }));
-                        const tx = await voterWithSigner.claimFees(feeAddresses, feeTokens, autovoterConfig.tokenId);
-                        await tx.wait();
-                        resultMsg += "Fees Claimed.";
+                    if (totalRealizedUSD > 0) {
+                        await recordRealizedEarnings(totalRealizedUSD);
+                        logTransaction('Claim Rewards', 'Multiple', 'Voted Pools', totalRealizedUSD, 'Confirmed');
                     }
 
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: true, message: `Success! ${resultMsg}` }));
+                    ws.send(JSON.stringify({ 
+                        type: 'rewards_tx_result', 
+                        success: true, 
+                        message: `Successfully claimed $${totalRealizedUSD.toFixed(2)} (${resultMsg})` 
+                    }));
 
                 } catch (e) {
-                    console.error("Claim Error:", e);
-                    ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: `Claim Failed: ${e.reason || e.message}` }));
+                    console.error("Manual Claim Error:", e);
+                    ws.send(JSON.stringify({ 
+                        type: 'rewards_tx_result', 
+                        success: false, 
+                        message: `Claim Failed: ${e.reason || e.message}` 
+                    }));
                 }
             }
            
@@ -1096,7 +1146,7 @@ const runAutoSequence = async () => {
             } else if (parsed.type === 'toggle_autovoter') {
                 autovoterConfig.enabled = !autovoterConfig.enabled;
                 saveCurrentSettings();
-                broadcast({ type: 'autovoter_config_status', data: autovoterConfig });
+broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
             } else if (parsed.type === 'set_vote_strategy') {
                 const { strategy, pools } = parsed.data;
                 if (['single', 'diversified', 'optimized'].includes(strategy)) {
@@ -1107,7 +1157,7 @@ const runAutoSequence = async () => {
                     autovoterConfig.diversificationPools = numPools;
                 }
                 saveCurrentSettings();
-                broadcast({ type: 'autovoter_config_status', data: autovoterConfig });
+broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
             } else if (parsed.type === 'trigger_test_vote') {
                 const { poolAddress } = parsed.data;
                 try {
@@ -1140,9 +1190,10 @@ const runAutoSequence = async () => {
         } catch (e) { console.error("Failed to parse message:", e); }
     });
 
-    if (latestFetchedData.summary.epochVoteEnd) {
-        broadcast({ type: 'summary', data: latestFetchedData.summary });
-        broadcast({ type: 'pools', data: latestFetchedData.pools });
+    
+    if (latestFetchedData.summary.epochVoteEnd && latestFetchedData.summary.totalVotingPower) {
+        ws.send(JSON.stringify({ type: 'summary', data: latestFetchedData.summary }));
+        ws.send(JSON.stringify({ type: 'pools', data: latestFetchedData.pools }));
     }
     broadcast({ type: 'status', message: 'Connected. Ready for setup.' });
 });
@@ -1281,11 +1332,11 @@ async function getPoolName(address) {
     return "Unknown Pool";
 }
 
-async function fetchData() {
+// =================================================================================
+// --- DATA FETCHING (SMART SCANNABLE) ---
+// =================================================================================
+async function fetchData(specificPoolAddresses = null) {
     try {
-        console.log("Fetching blockchain data...");
-        broadcast({ type: 'status', message: 'Fetching on-chain data...' });
-        
         const currentTimestamp = Math.floor(Date.now() / 1000);
         
         
@@ -1293,62 +1344,83 @@ async function fetchData() {
         let targetEpoch = Math.floor(currentTimestamp / epochDuration) * epochDuration;
         let prevEpoch = targetEpoch - epochDuration;
 
-        console.log(`Scanning Rewards for Epochs: ${new Date(targetEpoch * 1000).toLocaleDateString()} & ${new Date(prevEpoch * 1000).toLocaleDateString()}`);
-
         const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
 
-        const [totalVotingPower, weeklyEmissions, epochVoteEnd, poolCountBigInt] = await Promise.all([
-            voterContract.totalWeight(), minterContract.weekly(),
-            voterContract.epochVoteEnd(currentTimestamp), voterContract.length()
-        ]);
-        const poolCount = Number(poolCountBigInt);
-
-        console.log(`Scanning ${poolCount} approved pools in batches...`);
         
+        const [totalVotingPower, weeklyEmissions, epochVoteEnd, poolCountBigInt] = await Promise.all([
+            voterContract.totalWeight(), 
+            minterContract.weekly(),
+            voterContract.epochVoteEnd(currentTimestamp), 
+            voterContract.length()
+        ]);
+
+        
+        let poolListToProcess = [];
+        if (specificPoolAddresses && specificPoolAddresses.length > 0) {
+            poolListToProcess = specificPoolAddresses; 
+        } else {
+            
+            const poolCount = Number(poolCountBigInt);
+            poolListToProcess = Array.from({length: poolCount}, (_, i) => i);
+        }
+
+        console.log(`Fetching data for ${poolListToProcess.length} pools...`);
+        broadcast({ type: 'status', message: `Scanning ${poolListToProcess.length} pools...` });
+
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-       
         const batchSize = 7; 
 
-        for (let i = 0; i < poolCount; i += batchSize) {
+        for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
-            const endIndex = Math.min(i + batchSize, poolCount);
+            const endIndex = Math.min(i + batchSize, poolListToProcess.length);
 
             for (let j = i; j < endIndex; j++) {
                 batchPromises.push(
                     (async () => {
                         try {
-                            const poolAddress = await voterContract.pools(j);
-                            const gaugeAddress = await voterContract.gauges(poolAddress);
+                            let poolAddress;
+                            
+                            if (specificPoolAddresses) {
+                                poolAddress = poolListToProcess[j];
+                            } else {
+                                poolAddress = await voterContract.pools(poolListToProcess[j]);
+                            }
 
+                            const gaugeAddress = await voterContract.gauges(poolAddress);
                             if (gaugeAddress === ethers.ZeroAddress) return null;
+                            
                             const isGaugeAlive = await voterContract.isAlive(gaugeAddress);
                             if (!isGaugeAlive) return null;
-                            const votingPower = await voterContract.weights(poolAddress);
 
+                            const votingPower = await voterContract.weights(poolAddress);
                             const name = await getPoolName(poolAddress);
                             
                             const [feeAddr, bribeAddr] = await Promise.all([
-                                voterContract.gaugeToFees(gaugeAddress), voterContract.gaugeToBribe(gaugeAddress)
+                                voterContract.gaugeToFees(gaugeAddress), 
+                                voterContract.gaugeToBribe(gaugeAddress)
                             ]);
                             
-                           
-                            const poolInfo = { address: poolAddress, name: name, votingPower, fees: {}, bribes: {}, bribeAddress: bribeAddr, feeAddress: feeAddr };
+                            const poolInfo = { 
+                                address: poolAddress, 
+                                name: name, 
+                                votingPower, 
+                                fees: {}, 
+                                bribes: {}, 
+                                feeAddress: feeAddr, 
+                                bribeAddress: bribeAddr 
+                            };
 
                             const processRewards = async (contractAddress, rewardType) => {
                                 if (contractAddress === ethers.ZeroAddress) return;
                                 try {
                                     const contract = new ethers.Contract(contractAddress, abi.rewardContract, provider);
                                     const rewardsCount = await contract.rewardsListLength();
-                                    
-                                  
                                     const limit = Number(rewardsCount) > 10 ? 10 : Number(rewardsCount);
 
                                     for (let k = 0; k < limit; k++) {
                                         const tokenAddress = await contract.rewards(k);
-                                        
-                                        
                                         const [amountCurrent, amountPrev] = await Promise.all([
                                             contract.tokenRewardsPerEpoch(tokenAddress, targetEpoch),
                                             contract.tokenRewardsPerEpoch(tokenAddress, prevEpoch)
@@ -1356,38 +1428,30 @@ async function fetchData() {
 
                                         const totalAmount = amountCurrent + amountPrev;                                                                           
                                         
-                                        let shouldInclude = totalAmount > 0n;
-                                        if (rewardType === "fees") {
-                                            shouldInclude = true; 
-                                        }
-
-                                        if (shouldInclude) {
+                                        if (totalAmount > 0n || rewardType === "fees") {
                                             const { symbol, decimals } = await getTokenInfo(tokenAddress);
-                                            
                                             poolInfo[rewardType][tokenAddress.toLowerCase()] = { amount: totalAmount, decimals, symbol };
                                             requiredTokenAddresses.add(tokenAddress.toLowerCase());
-                                            knownTokenAddresses.add(tokenAddress);
+                                            knownTokenAddresses.add(tokenAddress); 
                                         }
                                     }
-                                } catch (e) { 
-                                    console.error(`Error fetching ${rewardType} for ${name}:`, e.message);
-                                }
+                                } catch (e) { }
                             };
+                            
                             await Promise.all([processRewards(feeAddr, "fees"), processRewards(bribeAddr, "bribes")]);
                             return poolInfo;
                         } catch (e) { return null; }
                     })()
                 );
             }
-			
+            
             const batchResults = await Promise.all(batchPromises);
             batchResults.forEach(pool => { if (pool) allPoolData.push(pool); });
-            broadcast({ type: 'scanning_progress', data: { scanned: endIndex, total: poolCount, active: allPoolData.length } });
-            await sleep(1000); 
+            
+            broadcast({ type: 'scanning_progress', data: { scanned: endIndex, total: poolListToProcess.length, active: allPoolData.length } });
+            
+await sleep(1200);
         }
-
-        console.log(`Found ${allPoolData.length} active pools. Fetching prices...`);
-        broadcast({ type: 'status', message: 'Fetching prices and TVLs...' });
 
         const poolAddresses = allPoolData.map(p => p.address);
         const [prices, tvls] = await Promise.all([
@@ -1410,7 +1474,6 @@ async function fetchData() {
             pool.tvl = tvls[pool.address.toLowerCase()] || 0;
 
             const votingPowerUSD = Number(ethers.formatEther(pool.votingPower)) * aeroPrice;
-
             totalFeesUSD += pool.totalFeesUSD;
             totalBribesUSD += pool.totalBribesUSD;
 
@@ -1421,14 +1484,11 @@ async function fetchData() {
             pool.emissionsUSD = pool.emissionsShare * aeroPrice;
 
             const totalRewardsUSD = pool.totalFeesUSD + pool.totalBribesUSD;
-
             pool.totalAPR = (votingPowerUSD > 1) ? (totalRewardsUSD / votingPowerUSD) * 52 * 100 : 0;
             pool.votesFmt = parseFloat(ethers.formatEther(pool.votingPower)).toLocaleString('en-US', { maximumFractionDigits: 0 });
 
             finalPools.push(pool);
         }
-
-        console.log(`Finished processing. Found ${finalPools.length} relevant pools.`);
 
         const summaryData = {
             totalVotingPower: ethers.formatEther(totalVotingPower),
@@ -1437,14 +1497,14 @@ async function fetchData() {
             totalFees: totalFeesUSD,
             totalIncentives: totalBribesUSD,
             totalRewards: totalFeesUSD + totalBribesUSD + (Number(ethers.formatEther(weeklyEmissions)) * aeroPrice),
-            totalVotablePools: poolCount,
+            totalVotablePools: Number(poolCountBigInt),
             activeVotablePools: finalPools.length
         };
 
         return { pools: finalPools, summary: summaryData, prices };
     } catch (error) {
-        console.error("\nError during data fetch:", error);
-        broadcast({ type: 'error', message: 'Server error during data fetch. Check console.' });
+        console.error("Error fetching data:", error);
+        broadcast({ type: 'error', message: 'Fetch failed. Retrying...' });
         return null;
     }
 }
@@ -1452,15 +1512,11 @@ async function fetchData() {
 // =================================================================================
 // --- HELPER FUNCTIONS FOR AUTO-PILOT ---
 // =================================================================================
-
 async function performRebase(signer, tokenIds) {
     const AERO_ADDRESS = "0x940181a94A35A4569E4529A3CDfB74e38FD98631";
     console.log("Starting Rebase Sequence...");
     
-    
     const ids = Array.isArray(tokenIds) ? tokenIds : [tokenIds];
-
-   
     const distributorWithSigner = distributorContract.connect(signer);
     const veNftWithSigner = veNftContract.connect(signer);
     const aeroContract = new ethers.Contract(AERO_ADDRESS, [
@@ -1469,270 +1525,310 @@ async function performRebase(signer, tokenIds) {
     ], signer);
 
     let lastTx = null;
+    let totalRebaseUsd = 0;
+    const aeroPrice = latestFetchedData.prices[AERO_ADDRESS.toLowerCase()] || 0;
 
     for (const id of ids) {
         try {
-            console.log(`Checking Rebase for ID: ${id}`);
-            
-           
             const amountToClaim = await distributorContract.claimable(id);
             
             if (amountToClaim > 0n) {
-               
                 broadcast({ type: 'swap_status', message: `Claiming Rebase for ID ${id}...` });
                 const claimTx = await distributorWithSigner.claim(id, { gasLimit: 500000 });
                 await claimTx.wait();
-                console.log(`Claimed ${ethers.formatEther(amountToClaim)} AERO for ID ${id}`);               
-                const walletBalance = await aeroContract.balanceOf(signer.address);
                 
+                totalRebaseUsd += (parseFloat(ethers.formatEther(amountToClaim)) * aeroPrice);
+
+                const walletBalance = await aeroContract.balanceOf(signer.address);
                 if (walletBalance > 0n) {
-                    broadcast({ type: 'swap_status', message: `Compounding into ID ${id}...` });
-                    
-                   
                     const approveTx = await aeroContract.approve(config.veNftAddress, walletBalance);
                     await approveTx.wait();
-
-                   
                     const lockTx = await veNftWithSigner.increaseAmount(id, walletBalance);
                     lastTx = lockTx; 
                     await lockTx.wait();
-                    
-                    console.log(`Compounded complete for ID ${id}`);
                 }
-            } else {
-                console.log(`ID ${id}: Nothing to rebase.`);
             }
         } catch (e) {
             console.error(`Rebase failed for ID ${id}:`, e.message);
-            broadcast({ type: 'swap_status', message: `Rebase Error ID ${id}: ${e.message}` });
         }
+    }
+
+    if (totalRebaseUsd > 0) {
+        console.log(`📈 Rebase profit added to analysis: $${totalRebaseUsd.toFixed(2)}`);
+        await recordRealizedEarnings(totalRebaseUsd);
     }
 
     return lastTx; 
 }
 
 async function performClaimBribes(signer, tokenIds, pools) {
-    console.log("Starting Reward Claim Sequence...");
+    console.log("--------------------------------------------------");
+    console.log("🚀 AUTO-PILOT: Starting Reward Claim Sequence...");
     
-    
+    if (!pools || pools.length === 0) {
+        console.log("⚠️ Pool data missing for claim. Attempting emergency scan...");
+        const fresh = await fetchData();
+        if (fresh) pools = fresh.pools;
+        else {
+            console.error("❌ Aborting claim: Could not fetch pool data.");
+            return null;
+        }
+    }
+
     const ids = Array.isArray(tokenIds) ? tokenIds : [tokenIds];
     const voterWithSigner = voterContract.connect(signer);
-    
     let lastTx = null;
+    let totalUsdRealizedAcrossAllNfts = 0;
 
     for (const id of ids) {
         try {
-            console.log(`Scanning rewards for Token ID: ${id}...`);
+            console.log(`🔍 Scanning Rewards for Token ID: ${id}...`);
             broadcast({ type: 'swap_status', message: `Scanning rewards for ID ${id}...` });
 
             const bribeAddresses = [];
             const bribeTokens = [];
             const feeAddresses = [];
             const feeTokens = [];            
+
             for (const pool of pools) {
-                
-               
-                if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress && pool.fees) {
+                if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress) {
                     const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, provider);
-                    const tokensToClaim = [];                   
+                    const tokensFound = [];                   
                     const potentialTokens = Object.keys(pool.fees);
                     
                     for (const tokenAddr of potentialTokens) {
                         try {
                             const earned = await contract.earned(tokenAddr, id);
-                            if (earned > 0n) tokensToClaim.push(tokenAddr);
+                            if (earned > 0n) {
+                                tokensFound.push(tokenAddr);
+                                
+                                const price = latestFetchedData.prices[tokenAddr.toLowerCase()] || 0;
+                                const decimals = pool.fees[tokenAddr.toLowerCase()]?.decimals || 18;
+                                const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                totalUsdRealizedAcrossAllNfts += usdValue;
+                                
+                                console.log(`   ✨ Found Fee: ${pool.name} (${pool.fees[tokenAddr.toLowerCase()]?.symbol}) - Value: $${usdValue.toFixed(2)}`);
+                            }
                         } catch(e) {}
                     }
-                    if (tokensToClaim.length > 0) {
+                    if (tokensFound.length > 0) {
                         feeAddresses.push(pool.feeAddress);
-                        feeTokens.push(tokensToClaim);
+                        feeTokens.push(tokensFound);
                     }
                 }
 
-               
-                if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress && pool.bribes) {
+                if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress) {
                     const contract = new ethers.Contract(pool.bribeAddress, abi.rewardContract, provider);
-                    const tokensToClaim = [];
+                    const tokensFound = [];
                     const potentialTokens = Object.keys(pool.bribes);
 
                     for (const tokenAddr of potentialTokens) {
                         try {
                             const earned = await contract.earned(tokenAddr, id);
-                            if (earned > 0n) tokensToClaim.push(tokenAddr);
+                            if (earned > 0n) {
+                                tokensFound.push(tokenAddr);
+                                
+                                const price = latestFetchedData.prices[tokenAddr.toLowerCase()] || 0;
+                                const decimals = pool.bribes[tokenAddr.toLowerCase()]?.decimals || 18;
+                                const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                totalUsdRealizedAcrossAllNfts += usdValue;
+
+                                console.log(`   ✨ Found Bribe: ${pool.name} (${pool.bribes[tokenAddr.toLowerCase()]?.symbol}) - Value: $${usdValue.toFixed(2)}`);
+                            }
                         } catch(e) {}
                     }
-                    if (tokensToClaim.length > 0) {
+                    if (tokensFound.length > 0) {
                         bribeAddresses.push(pool.bribeAddress);
-                        bribeTokens.push(tokensToClaim);
+                        bribeTokens.push(tokensFound);
                     }
                 }
             }
 
-            
-            if (bribeAddresses.length === 0 && feeAddresses.length === 0) {
-                console.log(`ID ${id}: No rewards found.`);
-                continue;
-            }
-
-            
             if (bribeAddresses.length > 0) {
-                console.log(`Claiming bribes from ${bribeAddresses.length} pools for ID ${id}...`);
+                console.log(`📡 Sending Bribe Claim Tx for ID ${id}...`);
                 broadcast({ type: 'swap_status', message: `Claiming Bribes for ID ${id}...` });
                 const tx = await voterWithSigner.claimBribes(bribeAddresses, bribeTokens, id);
                 lastTx = tx;
                 await tx.wait();
+                console.log(`✅ Bribe Claim Confirmed: ${tx.hash}`);
             }
 
-            
             if (feeAddresses.length > 0) {
-                console.log(`Claiming fees from ${feeAddresses.length} pools for ID ${id}...`);
+                console.log(`📡 Sending Fee Claim Tx for ID ${id}...`);
+                broadcast({ type: 'swap_status', message: `Claiming Fees for ID ${id}...` });
                 const tx = await voterWithSigner.claimFees(feeAddresses, feeTokens, id);
                 lastTx = tx;
                 await tx.wait();
+                console.log(`✅ Fee Claim Confirmed: ${tx.hash}`);
             }
-            
-            console.log(`Rewards claimed for ID ${id}.`);
 
         } catch (e) {
-            console.error(`Claim failed for ID ${id}:`, e.message);
+            console.error(`❌ Claim failed for Token ID ${id}:`, e.message);
             broadcast({ type: 'swap_status', message: `Claim Error ID ${id}: ${e.message}` });
         }
     }
 
+    if (totalUsdRealizedAcrossAllNfts > 0) {
+        console.log(`💰 Total Realized across all NFTs: $${totalUsdRealizedAcrossAllNfts.toFixed(2)}`);
+        await recordRealizedEarnings(totalUsdRealizedAcrossAllNfts);
+    } else {
+        console.log("ℹ️ No rewards were found to claim this cycle.");
+    }
+
+    console.log("--------------------------------------------------");
     return lastTx;
 }
 
 // =================================================================================
-// --- MAIN EXECUTION LOOP (SNIPER MODE) ---
+// --- ENGINE 1: THE SNIPER (Checks Time & Executes Vote) ---
 // =================================================================================
+let sniperInterval = null;
 
-let sniperTimer = null; // Timer for the specific last-minute shot
-let nextLoopTimer = null; // Timer for the next cycle
+function initSniper() {
+    if (sniperInterval) clearInterval(sniperInterval);
+    console.log("🔫 Sniper Engine Armed.");
 
-async function mainLoop() {
-    if (isFetching) {
-        console.log("⚠️ Data fetch already in progress. Skipping cycle.");
-        return;
-    }
-    isFetching = true;
+    sniperInterval = setInterval(async () => {
+        if (!autovoterConfig.enabled || !latestFetchedData.summary.epochVoteEnd) return;
 
-    try {
-        console.log("🔄 Starting Data Fetch (This may take time)...");
-        const fetchedData = await fetchData();
-        
-        if (fetchedData) {
-            latestFetchedData = fetchedData;
-            broadcast({ type: 'summary', data: fetchedData.summary });
-            broadcast({ type: 'pools', data: fetchedData.pools });
-            broadcast({ type: 'status', message: `Update complete.` });
+        const now = Math.floor(Date.now() / 1000);
+        const epochEnd = latestFetchedData.summary.epochVoteEnd;
+        const timeRemaining = epochEnd - now;
+        const voteLeadTime = config.voteLeadTime || 60; 
 
-            await trackEpochPerformance(fetchedData.summary, fetchedData.pools);
+        const currentEpochStart = epochEnd - (7 * 24 * 60 * 60);
 
-            const { epochVoteEnd } = fetchedData.summary;
-            
-            if (epochVoteEnd && autovoterConfig.enabled) {
-                const now = Math.floor(Date.now() / 1000);
-                const timeUntilEnd = epochVoteEnd - now;
-                const currentEpochStart = epochVoteEnd - (7 * 24 * 60 * 60);
-
-                const targetLeadTime = config.voteLeadTime || 60;
-                const timeUntilSnipe = timeUntilEnd - targetLeadTime; 
-
-                console.log(`⏱️ Epoch ends in ${(timeUntilEnd/60).toFixed(2)} minutes.`);
-
-               
-                if (timeUntilEnd > 0 && timeUntilEnd <= targetLeadTime) {
-                     if (lastEpochVoted !== currentEpochStart) {
-                        console.log("🚀 INSIDE VOTE WINDOW! Executing IMMEDIATELY.");
-                        await executeVote();
-                     }
-                }
-                           
-                else if (timeUntilEnd > 0 && timeUntilEnd < 900) {
-                    console.log(`🎯 SNIPER MODE: Stopping loops. Waiting ${timeUntilSnipe}s to snipe...`);
-                    broadcast({ type: 'status', message: `Waiting ${timeUntilSnipe}s to vote...` });
-                    
-                    if (sniperTimer) clearTimeout(sniperTimer);
-                    if (nextLoopTimer) clearTimeout(nextLoopTimer);
-
-                    sniperTimer = setTimeout(async () => {
-                        console.log("⚡ SNIPER TIMER FIRED: Executing Vote...");
-                        if (lastEpochVoted !== currentEpochStart) {
-                            await executeVote();
-                        }
-                    }, timeUntilSnipe * 1000);
-
-                    return; 
-                }
+        if (timeRemaining > 0 && timeRemaining <= voteLeadTime) {
+            if (lastEpochVoted !== currentEpochStart) {
+                console.log(`⚡ SNIPER TRIGGERED: ${timeRemaining}s remaining. Firing Vote!`);
+                await executeVote();
             }
         }
-    } catch (error) { 
-        console.error("Error in main loop:", error); 
-    } finally { 
-        isFetching = false; 
-        
-        if (!sniperTimer) {
-            console.log(`💤 Sleeping for ${config.fetchInterval / 60000} mins...`);
-            nextLoopTimer = setTimeout(mainLoop, config.fetchInterval);
-        }
-    }
+    }, 5000);
 }
 
-async function startScheduledScan() {
-    if (isLoopRunning) return;
-    
-    if (autovoterConfig.scanMode === 'immediate') {
-        console.log("\n=== IMMEDIATE MODE ACTIVATED ===");
-        broadcast({ type: 'status', message: `Immediate Mode: Scanning now...` });
-        isLoopRunning = true;
-        mainLoop(); 
+// =================================================================================
+// --- ENGINE 2: THE SMART SCANNER (Full Discovery -> Targeted Updates) ---
+// =================================================================================
+async function startContinuousScanner() {
+    if (isLoopRunning) {
+        console.log("⚠️ Scanner Engine is already running.");
         return;
     }
+    isLoopRunning = true;
 
-    console.log("Syncing with Blockchain Epoch Timer (Scheduled Mode)...");
+    console.log("🔄 Smart Scanner Engine Started.");
+    initSniper();
 
-    try {
-        const currentTimestamp = Math.floor(Date.now() / 1000);
-        let epochEnd = await voterContract.epochVoteEnd(currentTimestamp);
-        
-        const LEAD_TIME = 900; // 15 Minutes 
-        
-        let targetTimestamp = Number(epochEnd) - LEAD_TIME;
-        let delayMs = (targetTimestamp - currentTimestamp) * 1000;
+    let prioritizedPoolAddresses = null; 
 
-        if (delayMs <= 0) {
-            console.log("Info: Previous window passed. Calculating for NEXT Epoch...");
-            targetTimestamp += (7 * 24 * 60 * 60); 
-            delayMs = (targetTimestamp - currentTimestamp) * 1000;
+    while (true) {
+        try {
+            if (autovoterConfig.scanMode === 'scheduled') {
+                const now = Math.floor(Date.now() / 1000);
+                
+                if (!latestFetchedData.summary || !latestFetchedData.summary.epochVoteEnd) {
+                    try {
+                        console.log("⏳ Cold Start: Syncing Epoch Timer...");
+                        const epochEndBigInt = await voterContract.epochVoteEnd(now);
+                        let epochEnd = Number(epochEndBigInt);
+                        
+                        if (!latestFetchedData.summary) latestFetchedData.summary = {};
+                        latestFetchedData.summary.epochVoteEnd = epochEnd;
+                        console.log(`✅ Synced! Epoch Ends: ${new Date(epochEnd * 1000).toLocaleString()}`);
+                    } catch (e) {
+                        console.log("⚠️ Sync failed. Will try Full Scan.");
+                    }
+                }
+
+                if (latestFetchedData.summary && latestFetchedData.summary.epochVoteEnd) {
+                    let epochEnd = latestFetchedData.summary.epochVoteEnd;
+                    let timeRemaining = epochEnd - now;
+
+                    
+                    if (timeRemaining <= 0) {
+                        console.log("ℹ️ Current Epoch has passed. Switching target to NEXT Epoch.");
+                        epochEnd += (7 * 24 * 60 * 60); 
+                        latestFetchedData.summary.epochVoteEnd = epochEnd; 
+                        timeRemaining = epochEnd - now; 
+                        console.log(`📅 New Target: ${new Date(epochEnd * 1000).toLocaleString()}`);
+                    }
+                    
+
+                    const WAKE_UP_WINDOW = 900; 
+
+                    if (timeRemaining > WAKE_UP_WINDOW) {
+    const minsToWait = Math.floor((timeRemaining - WAKE_UP_WINDOW) / 60);
+    const hoursToWait = (minsToWait / 60).toFixed(1);
+        if (Date.now() % 60000 < 5000) { 
+        console.log(`[Scheduled Mode] 💤 Standing by. Wake up in ~${hoursToWait} hours.`);
+    }
+    
+    broadcast({ type: 'status', message: `Scheduled Mode: Sleeping (${hoursToWait}h until scan)...` });
+    
+    await sleep(5000); 
+    continue; 
+                    } else {
+                        console.log(`⏰ Scheduled Mode: WAKE UP! Inside the 15m window.`);
+                    }
+                }
+            }
+
+            const isFullScan = (prioritizedPoolAddresses === null);
+            
+            if (isFullScan) {
+                console.log(`\n[${new Date().toLocaleTimeString()}] 🌍 STARTING FULL DISCOVERY SCAN...`);
+            } else {
+                console.log(`\n[${new Date().toLocaleTimeString()}] 🎯 STARTING TARGETED SCAN...`);
+            }
+            
+            isFetching = true;
+            const fetchedData = await fetchData(prioritizedPoolAddresses);
+            isFetching = false;
+            
+            if (fetchedData && fetchedData.pools.length > 0) {
+                latestFetchedData = fetchedData;
+                
+                broadcast({ type: 'summary', data: fetchedData.summary });
+                broadcast({ type: 'pools', data: fetchedData.pools });
+                broadcast({ type: 'status', message: isFullScan ? 'Full Scan Complete' : 'Targeted Update Complete' });
+                
+                if (isFullScan) {
+                    const sorted = [...fetchedData.pools].sort((a, b) => {
+                        const rewardsA = a.totalFeesUSD + a.totalBribesUSD;
+                        const rewardsB = b.totalFeesUSD + b.totalBribesUSD;
+                        return rewardsB - rewardsA;
+                    });
+
+                    const topPools = sorted.slice(0, 60);
+                    prioritizedPoolAddresses = topPools.map(p => p.address);
+                }
+                trackEpochPerformance(fetchedData.summary, fetchedData.pools).catch(e => {});
+            } else {
+                prioritizedPoolAddresses = null; 
+            }
+
+        } catch (error) {
+            console.error("❌ Scanner crashed:", error.message);
+            isFetching = false;
+            prioritizedPoolAddresses = null;
+            await sleep(5000);
         }
 
-        const hoursToWait = (delayMs / 1000 / 60 / 60).toFixed(2);
-
-        console.log(`\n=== STANDBY MODE ===`);
-        console.log(`Current Time:    ${new Date().toLocaleString()}`);
-        console.log(`Scan Starts:     ${new Date(targetTimestamp * 1000).toLocaleString()} (15m before vote)`);
-        console.log(`Status:          Sleeping for ${hoursToWait} hours.`);
-        console.log(`====================\n`);
-
-        setTimeout(() => {
-            broadcast({ type: 'status', message: `Standby. Scanning starts in ${hoursToWait} hours.` });
-            broadcast({ type: 'scanning_progress', data: { scanned: 0, total: 0, active: 0 } });
-        }, 2000);
-
-        setTimeout(() => {
-            console.log("⏰ WAKE UP! Starting heavy scanning sequence...");
-            isLoopRunning = true;
-            mainLoop(); 
-        }, delayMs);
-
-    } catch (e) {
-        console.error("Error syncing time (RPC might be down). Retrying in 30 seconds...", e.message);
-        setTimeout(startScheduledScan, 30000);
+if (autovoterConfig.scanMode === 'immediate') {
+        const mins = config.fetchInterval / 60000;
+        console.log(`[Immediate Mode] Scan complete. Sleeping for ${mins} minutes...`);
+        await sleep(config.fetchInterval); 
+    } else {
+        await sleep(5000); 
+    }
     }
 }
+// =================================================================================
+// --- INITIALIZATION ---
+// =================================================================================
 
 loadSettings(); 
 loadTransactions();
 loadEpochHistory();
-startScheduledScan();
-
+startContinuousScanner();
