@@ -394,62 +394,58 @@ async function findOptimalDiversification(sortedPools, userVoteWeight) {
 }
 
 async function executeVote() {
-   
     if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
         broadcast({ type: 'autovoter_status', message: 'Bot not configured. Please save settings with at least one Token ID.' });
         return;
     }
 
-   
     const currentEpochStart = Math.floor(Date.now() / (1000 * 60 * 60 * 24 * 7)) * (60 * 60 * 24 * 7);
+    
     if (lastEpochVoted === currentEpochStart) {
         console.log("Vote for this epoch already attempted. Skipping.");
         return;
     }
 
+    if (!latestFetchedData.pools || latestFetchedData.pools.length === 0) {
+        console.log("⚠️ SNIPER: Attempted to vote, but pool data is still loading. Retrying in 5s...");
+        return; 
+    }
+
     console.log(`EXECUTE VOTE: Process started for ${autovoterConfig.tokenIds.length} NFTs.`);
+    
     lastEpochVoted = currentEpochStart;
 
     try {
         broadcast({ type: 'autovoter_status', message: 'Analyzing pools for optimal strategy...' });
 
-        
         const simulationId = autovoterConfig.tokenIds[0];
         const projection = await getProjectedVoteOutcome(simulationId, autovoterConfig.votePercentage);
         
         if (!projection || projection.length === 0) throw new Error("No pool data available to execute vote.");
 
-        
         let poolsToVoteFor = [];
         let estimatedTotalRewardValue = 0; 
 
-      
         if (autovoterConfig.voteStrategy === 'optimized') {
-           
             const currentTimestamp = Math.floor(Date.now() / 1000);
             const simPower = await veNftContract.balanceOfNFTAt(simulationId, currentTimestamp);
             poolsToVoteFor = await findOptimalDiversification(projection, simPower);
         } 
         else if (autovoterConfig.voteStrategy === 'diversified') {
-           
             const numPools = Math.min(autovoterConfig.diversificationPools, projection.length);
             poolsToVoteFor = projection.slice(0, numPools);
         } 
         else {
-           
             poolsToVoteFor = [projection[0]];
         }
 
         if (poolsToVoteFor.length === 0) throw new Error("Strategy resulted in no pools.");
 
-       
         const poolNames = poolsToVoteFor.map(p => p.name);
         const percentageAsInteger = BigInt(Math.round(autovoterConfig.votePercentage * 100));
 
-
         let totalEstimatedValue = 0;
         poolsToVoteFor.forEach(p => {
-            
              if (p.projectedUserWeeklyRewards) totalEstimatedValue += p.projectedUserWeeklyRewards;
         });
 
@@ -457,13 +453,11 @@ async function executeVote() {
         broadcast({ type: 'autovoter_status', message: `Voting for: ${poolNames.join(', ')}` });
         let successfulHashes = [];
 
-       
-      const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
+        const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
         const currentTimestamp = Math.floor(Date.now() / 1000);
 
         for (const tokenId of autovoterConfig.tokenIds) {
             try {
-               
                 const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
                 
                 if (totalVotingPower === 0n) {
@@ -471,7 +465,6 @@ async function executeVote() {
                     continue;
                 }
 
-               
                 const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
                 const weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
                 const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
@@ -483,7 +476,6 @@ async function executeVote() {
                 broadcast({ type: 'autovoter_status', message: `Voting ID ${tokenId}: Tx Sent...` });
                 await tx.wait();
                 
-               
                 successfulHashes.push(tx.hash);
                 console.log(`Confirmed vote for ID ${tokenId}. Hash: ${tx.hash}`);
 
@@ -493,18 +485,19 @@ async function executeVote() {
             }
         }
 
-        
         broadcast({ type: 'autovoter_status', message: `SUCCESS! All votes processed.` });
         
-   
         let finalHashLabel = 'Multiple-NFTs';
         if (successfulHashes.length === 1) finalHashLabel = successfulHashes[0];
 
-        
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
-		
+        
     } catch (error) {
         console.error("VOTE EXECUTION FAILED:", error);
+        
+       
+        lastEpochVoted = null; 
+        
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
         logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
     }
@@ -1384,7 +1377,7 @@ async function fetchData(specificPoolAddresses = null) {
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 4; 
+        const batchSize = 7; 
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
