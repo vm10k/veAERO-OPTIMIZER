@@ -489,6 +489,7 @@ async function executeVote() {
         
         let finalHashLabel = 'Multiple-NFTs';
         if (successfulHashes.length === 1) finalHashLabel = successfulHashes[0];
+        await recordProjectedAPR(totalEstimatedValue);
 
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
         
@@ -1078,11 +1079,25 @@ const runAutoSequence = async () => {
                             resultMsg += `ID ${id} Fees `;
                         }
                     }
-
-                    if (totalRealizedUSD > 0) {
+if (totalRealizedUSD > 0) {
                         await recordRealizedEarnings(totalRealizedUSD);
-                        logTransaction('Claim Rewards', 'Multiple', 'Voted Pools', totalRealizedUSD, 'Confirmed');
+
+                      
+                        const lastVoteTx = transactionHistory.find(tx => tx.type === 'Auto-Vote');
+                        
+                        if (lastVoteTx) {
+                            console.log(`📝 Updating History: Changing Est. $${lastVoteTx.value.toFixed(2)} to Actual $${totalRealizedUSD.toFixed(2)}`);
+                            
+                            lastVoteTx.value = totalRealizedUSD; 
+                            lastVoteTx.status = "Rewards Claimed"; 
+                            
+                            fs.writeFileSync(transactionsFilePath, JSON.stringify(transactionHistory, null, 2), 'utf8');
+                            
+                            const totalEarnings = transactionHistory.reduce((acc, tx) => acc + (tx.value || 0), 0);
+                            broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings } });
+                        }
                     }
+					
 
                     ws.send(JSON.stringify({ 
                         type: 'rewards_tx_result', 
@@ -1198,12 +1213,46 @@ broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
     });
 
     
+    const bigIntReplacer = (key, value) => typeof value === 'bigint' ? value.toString() : value;
+
     if (latestFetchedData.summary.epochVoteEnd && latestFetchedData.summary.totalVotingPower) {
-        ws.send(JSON.stringify({ type: 'summary', data: latestFetchedData.summary }));
-        ws.send(JSON.stringify({ type: 'pools', data: latestFetchedData.pools }));
+        ws.send(JSON.stringify({ type: 'summary', data: latestFetchedData.summary }, bigIntReplacer));
+        ws.send(JSON.stringify({ type: 'pools', data: latestFetchedData.pools }, bigIntReplacer));
     }
     broadcast({ type: 'status', message: 'Connected. Ready for setup.' });
 });
+async function recordProjectedAPR(totalEstimatedValueUSD) {
+    try {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        const AERODROME_START = 1693353600;
+        const epochDuration = 604800;
+        const currentEpochId = Math.floor((currentTimestamp - AERODROME_START) / epochDuration);
+
+        const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
+        const aeroPrice = latestFetchedData.prices[AERO_ADDRESS] || 0;
+
+        let totalUserPower = 0;
+        for (const id of autovoterConfig.tokenIds) {
+            const power = await veNftContract.balanceOfNFTAt(id, currentTimestamp);
+            totalUserPower += parseFloat(ethers.formatEther(power));
+        }
+
+        const totalPowerValueUsd = totalUserPower * aeroPrice;
+        let projectedApr = 0;
+        if (totalPowerValueUsd > 0) {
+            projectedApr = (totalEstimatedValueUSD / totalPowerValueUsd) * 52 * 100;
+        }
+
+        if (!epochHistory[currentEpochId]) {
+            epochHistory[currentEpochId] = { epochId: currentEpochId, indexApr: 0, userApr: 0, earnings: 0, timestamp: Date.now() };
+        }
+
+        epochHistory[currentEpochId].userApr = parseFloat(projectedApr.toFixed(2));
+        
+        saveEpochHistory();
+        broadcast({ type: 'epoch_history_update', data: epochHistory });
+    } catch (e) { console.error("Analysis Error:", e); }
+}
 
 function broadcast(dataObject) {
     const dataString = JSON.stringify(dataObject, (key, value) =>
@@ -1377,7 +1426,7 @@ async function fetchData(specificPoolAddresses = null) {
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 7; 
+        const batchSize = 8; 
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
@@ -1675,11 +1724,24 @@ async function performClaimBribes(signer, tokenIds, pools) {
         }
     }
 
-    if (totalUsdRealizedAcrossAllNfts > 0) {
+   if (totalUsdRealizedAcrossAllNfts > 0) {
         console.log(`💰 Total Realized across all NFTs: $${totalUsdRealizedAcrossAllNfts.toFixed(2)}`);
+        
         await recordRealizedEarnings(totalUsdRealizedAcrossAllNfts);
-    } else {
-        console.log("ℹ️ No rewards were found to claim this cycle.");
+
+        const lastVoteTx = transactionHistory.find(tx => tx.type === 'Auto-Vote');
+        
+        if (lastVoteTx) {
+            console.log(`📝 Updating History: Changing Est. $${lastVoteTx.value.toFixed(2)} to Actual $${totalUsdRealizedAcrossAllNfts.toFixed(2)}`);
+            
+            lastVoteTx.value = totalUsdRealizedAcrossAllNfts;
+            lastVoteTx.status = "Rewards Claimed"; 
+            
+            fs.writeFileSync(transactionsFilePath, JSON.stringify(transactionHistory, null, 2), 'utf8');
+            
+            const totalEarnings = transactionHistory.reduce((acc, tx) => acc + (tx.value || 0), 0);
+            broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings } });
+        }
     }
 
     console.log("--------------------------------------------------");
@@ -1762,7 +1824,7 @@ async function startContinuousScanner() {
                     }
                     
 
-                    const WAKE_UP_WINDOW = 900; 
+                    const WAKE_UP_WINDOW = 960; 
 
                     if (timeRemaining > WAKE_UP_WINDOW) {
     const minsToWait = Math.floor((timeRemaining - WAKE_UP_WINDOW) / 60);
