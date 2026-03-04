@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "PUT YOUR RPC HERE",
+    rpcUrl: "PUT YOUR PAID RPC HERE",
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -412,7 +412,6 @@ async function executeVote() {
     }
 
     console.log(`EXECUTE VOTE: Process started for ${autovoterConfig.tokenIds.length} NFTs.`);
-    
     lastEpochVoted = currentEpochStart;
 
     try {
@@ -420,7 +419,6 @@ async function executeVote() {
 
         const simulationId = autovoterConfig.tokenIds[0];
         const projection = await getProjectedVoteOutcome(simulationId, autovoterConfig.votePercentage);
-        
         if (!projection || projection.length === 0) throw new Error("No pool data available to execute vote.");
 
         let poolsToVoteFor = [];
@@ -443,7 +441,6 @@ async function executeVote() {
 
         const poolNames = poolsToVoteFor.map(p => p.name);
         const percentageAsInteger = BigInt(Math.round(autovoterConfig.votePercentage * 100));
-
         let totalEstimatedValue = 0;
         poolsToVoteFor.forEach(p => {
              if (p.projectedUserWeeklyRewards) totalEstimatedValue += p.projectedUserWeeklyRewards;
@@ -451,37 +448,72 @@ async function executeVote() {
 
         console.log(`Targeting ${poolsToVoteFor.length} pools: ${poolNames.join(', ')}`);
         broadcast({ type: 'autovoter_status', message: `Voting for: ${poolNames.join(', ')}` });
+        
         let successfulHashes = [];
-
         const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
         const currentTimestamp = Math.floor(Date.now() / 1000);
 
-        for (const tokenId of autovoterConfig.tokenIds) {
-            try {
-                const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
-                
-                if (totalVotingPower === 0n) {
-                    console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
-                    continue;
+        let currentNonce = await autovoterConfig.signer.getNonce("latest");
+
+        // 2. Process in Batches of 2 NFTS (change it as needed)
+        const BATCH_SIZE = 2; 
+        const tokenIds = autovoterConfig.tokenIds;
+
+        for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
+            const batch = tokenIds.slice(i, i + BATCH_SIZE);
+            console.log(`Processing Batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.join(', ')})...`);
+
+            // Map the batch to an array of Promises
+            const votePromises = batch.map(async (tokenId, index) => {
+                try {
+                    const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
+                    
+                    if (totalVotingPower === 0n) {
+                        console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
+                        return null;
+                    }
+
+                    const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
+                    const weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
+                    const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
+                    const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
+
+                    const txNonce = currentNonce + index; 
+
+                    console.log(`Voting ID ${tokenId} (Nonce: ${txNonce})...`);
+                    
+                    const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution, {
+                        nonce: txNonce
+                    });
+                    
+                    return tx; // Return the pending transaction object
+                } catch (err) {
+                    console.error(`Error preparing vote for ID ${tokenId}: ${err.message}`);
+                    return null;
                 }
+            });
 
-                const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
-                const weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
-                const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
-                const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
+            // Wait for all transactions in this batch to be SENT
+            const sentTxs = await Promise.all(votePromises);
 
-                console.log(`Voting with Token ID ${tokenId}...`);
-                const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution);
+            // Increment nonce for the next batch
+            currentNonce += batch.length;
+
+            // Now wait for them to be MINED (Confirmed) concurrently
+            const validTxs = sentTxs.filter(tx => tx !== null);
+            if (validTxs.length > 0) {
+                broadcast({ type: 'autovoter_status', message: `Waiting for ${validTxs.length} txs to confirm...` });
                 
-                broadcast({ type: 'autovoter_status', message: `Voting ID ${tokenId}: Tx Sent...` });
-                await tx.wait();
-                
-                successfulHashes.push(tx.hash);
-                console.log(`Confirmed vote for ID ${tokenId}. Hash: ${tx.hash}`);
-
-            } catch (innerError) {
-                console.error(`Failed to vote for Token ID ${tokenId}:`, innerError.message);
-                broadcast({ type: 'autovoter_status', message: `Error voting ID ${tokenId}: ${innerError.shortMessage || innerError.message}` });
+                // Wait for all receipts in parallel
+                await Promise.all(validTxs.map(async (tx) => {
+                    try {
+                        await tx.wait();
+                        successfulHashes.push(tx.hash);
+                        console.log(`✅ Confirmed: ${tx.hash}`);
+                    } catch (e) {
+                        console.error(`❌ Tx Failed: ${e.message}`);
+                    }
+                }));
             }
         }
 
@@ -489,16 +521,12 @@ async function executeVote() {
         
         let finalHashLabel = 'Multiple-NFTs';
         if (successfulHashes.length === 1) finalHashLabel = successfulHashes[0];
-        await recordProjectedAPR(totalEstimatedValue);
 
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
         
     } catch (error) {
         console.error("VOTE EXECUTION FAILED:", error);
-        
-       
         lastEpochVoted = null; 
-        
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
         logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
     }
@@ -1080,19 +1108,24 @@ const runAutoSequence = async () => {
                         }
                     }
 if (totalRealizedUSD > 0) {
+                        // 1. Update the Green Top Bar
                         await recordRealizedEarnings(totalRealizedUSD);
 
-                      
+                        // 2. FIND AND UPDATE THE LAST VOTE ROW
+                        // We look for the most recent 'Auto-Vote' in the history
                         const lastVoteTx = transactionHistory.find(tx => tx.type === 'Auto-Vote');
                         
                         if (lastVoteTx) {
                             console.log(`📝 Updating History: Changing Est. $${lastVoteTx.value.toFixed(2)} to Actual $${totalRealizedUSD.toFixed(2)}`);
                             
+                            // OVERWRITE the Estimated Value with the Actual Claimed Value
                             lastVoteTx.value = totalRealizedUSD; 
-                            lastVoteTx.status = "Rewards Claimed"; 
+                            lastVoteTx.status = "Rewards Claimed"; // Update status to show it's done
                             
+                            // Save to file
                             fs.writeFileSync(transactionsFilePath, JSON.stringify(transactionHistory, null, 2), 'utf8');
                             
+                            // Update the UI Table immediately
                             const totalEarnings = transactionHistory.reduce((acc, tx) => acc + (tx.value || 0), 0);
                             broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings } });
                         }
@@ -1426,7 +1459,7 @@ async function fetchData(specificPoolAddresses = null) {
         const allPoolData = [];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 8; 
+        const batchSize = 7; 
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
             const batchPromises = [];
@@ -1878,10 +1911,9 @@ async function startContinuousScanner() {
             }
 
         } catch (error) {
-            console.error("❌ Scanner crashed:", error.message);
+            console.error("❌ Scanner crashed (likely RPC limit). Pause for 60s...", error.message);
             isFetching = false;
-            prioritizedPoolAddresses = null;
-            await sleep(5000);
+            await sleep(10000); // INCREASED: Wait 1 minute before trying again to let the RPC cool down
         }
 
 if (autovoterConfig.scanMode === 'immediate') {
