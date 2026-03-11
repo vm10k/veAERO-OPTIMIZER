@@ -1539,7 +1539,7 @@ async function fetchData(specificPoolAddresses = null) {
             
             broadcast({ type: 'scanning_progress', data: { scanned: endIndex, total: poolListToProcess.length, active: allPoolData.length } });
             
-await sleep(1200);
+await sleep(1700);
         }
 
         const poolAddresses = allPoolData.map(p => p.address);
@@ -1868,7 +1868,7 @@ async function startContinuousScanner() {
     
     broadcast({ type: 'status', message: `Scheduled Mode: Sleeping (${hoursToWait}h until scan)...` });
     
-    await sleep(5000); 
+    await sleep(7000); 
     continue; 
                     } else {
                         console.log(`⏰ Scheduled Mode: WAKE UP! Inside the 15m window.`);
