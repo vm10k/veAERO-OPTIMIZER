@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "PUT YOUR PAID RPC HERE",
+    rpcUrl: "PUT YOUR PAID RPC HERE ",
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -204,9 +204,10 @@ async function trackEpochPerformance(summary, pools) {
 
     const AERODROME_START = 1693353600;
     const epochDuration = 604800;
+    
     const currentEpochId = Math.floor((summary.epochVoteEnd - AERODROME_START) / epochDuration);
     
-    const previousEpochId = currentEpochId - 1;
+    const targetDisplayEpochId = currentEpochId - 1;
 
     let indexApr = 0;
     const validPools = pools.filter(p => p.tvl >= 100000);
@@ -216,9 +217,9 @@ async function trackEpochPerformance(summary, pools) {
         indexApr = top3.reduce((sum, p) => sum + p.totalAPR, 0) / top3.length;
     }
 
-    if (!epochHistory[currentEpochId]) {
-        epochHistory[currentEpochId] = {
-            epochId: currentEpochId,
+    if (!epochHistory[targetDisplayEpochId]) {
+        epochHistory[targetDisplayEpochId] = {
+            epochId: targetDisplayEpochId,
             indexApr: parseFloat(indexApr.toFixed(2)),
             userApr: 0,
             earnings: 0,
@@ -226,12 +227,23 @@ async function trackEpochPerformance(summary, pools) {
             timestamp: Date.now()
         };
     } else {
-        epochHistory[currentEpochId].indexApr = parseFloat(indexApr.toFixed(2));
+        epochHistory[targetDisplayEpochId].indexApr = parseFloat(indexApr.toFixed(2));
     }
 
     saveEpochHistory();
+
+    broadcast({ 
+        type: 'header_stats_update', 
+        data: {
+            userApr: epochHistory[targetDisplayEpochId].userApr,
+            indexApr: epochHistory[targetDisplayEpochId].indexApr,
+            epochId: targetDisplayEpochId
+        }
+    });
+
     broadcast({ type: 'epoch_history_update', data: epochHistory });
 }
+
 async function recordRealizedEarnings(usdAmount) {
     if (usdAmount <= 0) return;
 
@@ -455,7 +467,6 @@ async function executeVote() {
 
         let currentNonce = await autovoterConfig.signer.getNonce("latest");
 
-        // 2. Process in Batches of 2 NFTS (change it as needed)
         const BATCH_SIZE = 2; 
         const tokenIds = autovoterConfig.tokenIds;
 
@@ -463,7 +474,6 @@ async function executeVote() {
             const batch = tokenIds.slice(i, i + BATCH_SIZE);
             console.log(`Processing Batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.join(', ')})...`);
 
-            // Map the batch to an array of Promises
             const votePromises = batch.map(async (tokenId, index) => {
                 try {
                     const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
@@ -486,25 +496,21 @@ async function executeVote() {
                         nonce: txNonce
                     });
                     
-                    return tx; // Return the pending transaction object
+                    return tx; 
                 } catch (err) {
                     console.error(`Error preparing vote for ID ${tokenId}: ${err.message}`);
                     return null;
                 }
             });
 
-            // Wait for all transactions in this batch to be SENT
             const sentTxs = await Promise.all(votePromises);
 
-            // Increment nonce for the next batch
             currentNonce += batch.length;
 
-            // Now wait for them to be MINED (Confirmed) concurrently
             const validTxs = sentTxs.filter(tx => tx !== null);
             if (validTxs.length > 0) {
                 broadcast({ type: 'autovoter_status', message: `Waiting for ${validTxs.length} txs to confirm...` });
                 
-                // Wait for all receipts in parallel
                 await Promise.all(validTxs.map(async (tx) => {
                     try {
                         await tx.wait();
@@ -1108,24 +1114,18 @@ const runAutoSequence = async () => {
                         }
                     }
 if (totalRealizedUSD > 0) {
-                        // 1. Update the Green Top Bar
                         await recordRealizedEarnings(totalRealizedUSD);
 
-                        // 2. FIND AND UPDATE THE LAST VOTE ROW
-                        // We look for the most recent 'Auto-Vote' in the history
                         const lastVoteTx = transactionHistory.find(tx => tx.type === 'Auto-Vote');
                         
                         if (lastVoteTx) {
                             console.log(`📝 Updating History: Changing Est. $${lastVoteTx.value.toFixed(2)} to Actual $${totalRealizedUSD.toFixed(2)}`);
                             
-                            // OVERWRITE the Estimated Value with the Actual Claimed Value
                             lastVoteTx.value = totalRealizedUSD; 
-                            lastVoteTx.status = "Rewards Claimed"; // Update status to show it's done
+                            lastVoteTx.status = "Rewards Claimed"; 
                             
-                            // Save to file
                             fs.writeFileSync(transactionsFilePath, JSON.stringify(transactionHistory, null, 2), 'utf8');
                             
-                            // Update the UI Table immediately
                             const totalEarnings = transactionHistory.reduce((acc, tx) => acc + (tx.value || 0), 0);
                             broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings } });
                         }
@@ -1913,7 +1913,7 @@ async function startContinuousScanner() {
         } catch (error) {
             console.error("❌ Scanner crashed (likely RPC limit). Pause for 60s...", error.message);
             isFetching = false;
-            await sleep(10000); // INCREASED: Wait 1 minute before trying again to let the RPC cool down
+            await sleep(10000); 
         }
 
 if (autovoterConfig.scanMode === 'immediate') {
