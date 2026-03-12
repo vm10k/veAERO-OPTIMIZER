@@ -936,7 +936,17 @@ case 'swap_status':
                                 this.summaryData = message.data;
                                 this.renderSummary(message.data); 
                                 this.startCountdown(message.data.epochVoteEnd);
-                                break;
+                                
+							break;
+							case 'header_stats_update':
+    const hData = message.data;
+    document.getElementById('chart-autopilot-apr').textContent = `${hData.userApr.toFixed(2)}%`;
+    document.getElementById('chart-index-apr').textContent = `${hData.indexApr.toFixed(2)}%`;
+    
+    const diff = hData.userApr - hData.indexApr;
+    const diffPercent = hData.indexApr > 0 ? (diff / hData.indexApr) * 100 : 0;
+    document.getElementById('chart-outperformance').textContent = `${diff >= 0 ? '+' : ''}${diffPercent.toFixed(1)}%`;
+    break;
                             case 'epoch_history_update':
                                 
                                 if (this.summaryData && this.summaryData.epochVoteEnd) {
@@ -1285,7 +1295,10 @@ renderSwapList: function(tokens) {
                     });
 
                     
-                    const lastEpoch = this.epochHistory[historyKeys[historyKeys.length - 1]];
+let lastEpoch = this.epochHistory[historyKeys[historyKeys.length - 1]];
+if (lastEpoch.userApr === 0 && historyKeys.length > 1) {
+    lastEpoch = this.epochHistory[historyKeys[historyKeys.length - 2]];
+}
                     const diff = lastEpoch.userApr - lastEpoch.indexApr;
                     const diffSign = diff >= 0 ? '+' : '';
                     const diffPercent = lastEpoch.indexApr > 0 ? (diff/lastEpoch.indexApr)*100 : 0;
