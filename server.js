@@ -2,14 +2,17 @@ require('dotenv').config();
 const { ethers } = require("ethers");
 const WebSocket = require('ws');
 const fs = require('fs');
+const express = require('express');
+const path = require('path');
+const http = require('http');
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // =================================================================================
 // --- SERVER CONFIGURATION & CONSTANTS ---
 // =================================================================================
 const config = {
-    port: 3000,
-    rpcUrls:[
+    port: process.env.PORT || 3000,
+    rpcUrls: process.env.RPC_URLS ? process.env.RPC_URLS.split(',').map(s => s.trim()) : [
         "GET FREE TIER RPC FROM ALCHEMY",        
         "GET FREE TIER RPC FROM ANKR",      
 		"GET FREE TIER RPC FROM TENDERLY",      
@@ -132,7 +135,7 @@ let autovoterConfig = {
     voteStrategy: 'optimized', 
     diversificationPools: 3,
     scanMode: 'scheduled',
-    rpcUrl: config.rpcUrl, 
+    rpcUrl: config.rpcUrls[0], 
     batchSize: 7,
     fetchDelayMs: 1200
 };
@@ -832,13 +835,23 @@ async function executeOdosSwap(inputTokens, outputTokenAddress) {
 }
 
 // =================================================================================
-// --- WEB SOCKET SERVER ---
+// --- HTTP & WEB SOCKET SERVER ---
 // =================================================================================
-const wss = new WebSocket.Server({ port: config.port });
-console.log(`WebSocket server started on port ${config.port}...`);
-loadSettings();
-loadTransactions();
-loadEpochHistory();
+const app = express();
+const server = http.createServer(app);
+
+// Serve specific static files to prevent leaking sensitive files in root (e.g. .env)
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
+app.get('/aero.png', (req, res) => res.sendFile(path.join(__dirname, 'aero.png')));
+app.get('/background-sprite.png', (req, res) => res.sendFile(path.join(__dirname, 'background-sprite.png')));
+app.use('/screenshots', express.static(path.join(__dirname, 'screenshots')));
+
+const wss = new WebSocket.Server({ server });
+console.log(`HTTP and WebSocket server started on port ${config.port}...`);
+
+server.listen(config.port, () => {
+    console.log(`Server is running at http://localhost:${config.port}`);
+});
 
 wss.on('connection', ws => {
     console.log('Client connected.');

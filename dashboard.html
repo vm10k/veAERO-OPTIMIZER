@@ -903,7 +903,7 @@
                 },
 
                 connectWebSocket: function() {
-                    const wsUrl = `ws://localhost:3000`;
+                    const wsUrl = `ws://${window.location.host}`;
                     this.socket = new WebSocket(wsUrl);
 
                     const statusTextEl = document.getElementById('pool-status');

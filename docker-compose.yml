@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  veaero-optimizer:
+    build: .
+    container_name: veaero-optimizer
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./.env:/app/.env
+      - ./settings.json:/app/settings.json
+      - ./transactions.json:/app/transactions.json
+      - ./epochs.json:/app/epochs.json
+      - ./screenshots:/app/screenshots
+    restart: always
