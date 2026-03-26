@@ -9,7 +9,12 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrl: "PUT YOUR PAID RPC HERE ",
+    rpcUrls:[
+        "GET FREE TIER RPC FROM ALCHEMY",        
+        "GET FREE TIER RPC FROM ANKR",      
+		"GET FREE TIER RPC FROM TENDERLY",      
+        "https://base-mainnet.public.blastapi.io"      
+    ],
     voteLeadTime: 60, 
     fetchInterval: 300000, 
     voterAddress: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5",
@@ -17,7 +22,18 @@ const config = {
     distributorAddress: "0x227f65131A261548b057215bB1D5Ab2997964C7d",
     veNftAddress: "0xeBf418Fe2512e7E6bd9b87a8F0f294aCDC67e6B4" 
 };
-const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+
+let provider; 
+let providers =[]; 
+let providerIndex = 0;
+
+function getNextProvider() {
+    if (providers.length === 0) return provider;
+    const p = providers[providerIndex];
+    providerIndex = (providerIndex + 1) % providers.length;
+    return p;
+}
+
 const settingsFilePath = './settings.json';
 const transactionsFilePath = './transactions.json';
 const epochsFilePath = './epochs.json';
@@ -68,11 +84,32 @@ const abi = {
     ]
 };
 
-const voterContract = new ethers.Contract(config.voterAddress, abi.voter, provider);
-const minterContract = new ethers.Contract(config.minterAddress, abi.minter, provider);
-const veNftContract = new ethers.Contract(config.veNftAddress, abi.veNft, provider);
-const distributorContract = new ethers.Contract(config.distributorAddress, abi.distributor, provider);
+let voterContract, minterContract, veNftContract, distributorContract;
 const tokenInfoCache = {};
+
+function initBlockchain(rpcs) {
+    try {
+        if (!rpcs) rpcs = config.rpcUrls;
+
+        let rpcArray = Array.isArray(rpcs) ? rpcs : rpcs.split(',').map(s => s.trim());
+        console.log(`Connecting to ${rpcArray.length} Blockchain RPC(s)...`);
+        
+        
+        providers = rpcArray.map(url => new ethers.JsonRpcProvider(url, 8453, { staticNetwork: true }));
+        provider = providers[0]; 
+        
+        voterContract = new ethers.Contract(config.voterAddress, abi.voter, provider);
+        minterContract = new ethers.Contract(config.minterAddress, abi.minter, provider);
+        veNftContract = new ethers.Contract(config.veNftAddress, abi.veNft, provider);
+        distributorContract = new ethers.Contract(config.distributorAddress, abi.distributor, provider);
+        
+        if (autovoterConfig.privateKey) {
+            autovoterConfig.signer = new ethers.Wallet(autovoterConfig.privateKey, provider);
+        }
+    } catch (e) {
+        console.error("Failed to initialize blockchain provider:", e.message);
+    }
+}
 
 // =================================================================================
 // --- GLOBAL STATE & PERSISTENCE ---
@@ -86,6 +123,7 @@ let compoundIntervalTimer = null;
 
 const knownTokenAddresses = new Set(); 
 
+
 let autovoterConfig = {
     signer: null,
     tokenIds: [], 
@@ -93,50 +131,63 @@ let autovoterConfig = {
     enabled: false,
     voteStrategy: 'optimized', 
     diversificationPools: 3,
-	scanMode: 'scheduled' 
+    scanMode: 'scheduled',
+    rpcUrl: config.rpcUrl, 
+    batchSize: 7,
+    fetchDelayMs: 1200
 };
 let isLoopRunning = false;
 
 function loadSettings() {
     try {
+        console.log("Loading settings...");
+
         if (fs.existsSync(settingsFilePath)) {
             const data = fs.readFileSync(settingsFilePath, 'utf8');
             const savedSettings = JSON.parse(data);
             
-            autovoterConfig.tokenId = savedSettings.tokenId || null;
             autovoterConfig.tokenIds = savedSettings.tokenIds || []; 
+            autovoterConfig.tokenId = savedSettings.tokenId || (autovoterConfig.tokenIds[0] || null);
+            
             autovoterConfig.votePercentage = savedSettings.votePercentage || 100;
             autovoterConfig.enabled = savedSettings.enabled || false;
             autovoterConfig.voteStrategy = savedSettings.voteStrategy || 'optimized';
             autovoterConfig.diversificationPools = savedSettings.diversificationPools || 3;
             autovoterConfig.scanMode = savedSettings.scanMode || 'scheduled'; 
             
-            console.log("Loaded general settings from settings.json");
+            autovoterConfig.rpcUrl = savedSettings.rpcUrl || config.rpcUrl;
+            autovoterConfig.batchSize = savedSettings.batchSize || 7;
+            autovoterConfig.fetchDelayMs = savedSettings.fetchDelayMs || 1000;
+
+            console.log(`Loaded preferences for ${autovoterConfig.tokenIds.length} Token IDs.`);
+        } else {
+            console.log("settings.json not found, using default configuration.");
+            autovoterConfig.rpcUrl = config.rpcUrl;
         }
 
-        const secretKey = process.env.PRIVATE_KEY;
+        initBlockchain(autovoterConfig.rpcUrl);
 
-        if (secretKey) {
+        
+        const envKey = process.env.PRIVATE_KEY;
+
+        if (envKey && envKey.trim() !== "") {
             try {
-                autovoterConfig.privateKey = secretKey;
-                autovoterConfig.signer = new ethers.Wallet(secretKey, provider);
-                console.log(`Wallet initialized securely: ${autovoterConfig.signer.address}`);
+                autovoterConfig.signer = new ethers.Wallet(envKey, provider);
+                autovoterConfig.privateKey = envKey; 
                 
-                if (!autovoterConfig.tokenIds.length && autovoterConfig.tokenId) {
-                    autovoterConfig.tokenIds = [autovoterConfig.tokenId];
-                }
+                console.log(`[SECURITY] Wallet initialized from .env: ${autovoterConfig.signer.address}`);
             } catch (e) {
-                console.error("Failed to initialize wallet from PRIVATE_KEY in .env:", e.message);
+                console.error("[SECURITY ERROR] The Private Key in your .env file is invalid:", e.message);
             }
         } else {
-            console.warn("⚠️ WARNING: No PRIVATE_KEY found in .env file. Bot is in Watch-Only mode.");
+            console.warn("[SECURITY] No PRIVATE_KEY found in .env. Auto-voting will be disabled until a key is provided via Dashboard.");
         }
 
     } catch (error) {
-        console.error("Could not load settings:", error);
+        console.error("Critical error during loadSettings:", error.message);
+        initBlockchain(config.rpcUrl);
     }
 }
-
 function loadTransactions() {
     try {
         if (fs.existsSync(transactionsFilePath)) {
@@ -172,6 +223,9 @@ function saveEpochHistory() {
 }
 
 function logTransaction(type, txHash, pools, estimatedValueUSD, status) {
+	 if (!transactionHistory || !Array.isArray(transactionHistory)) {
+        transactionHistory =[];
+    }
     const txData = {
         timestamp: Date.now(),
         type: type, 
@@ -433,7 +487,7 @@ async function executeVote() {
         const projection = await getProjectedVoteOutcome(simulationId, autovoterConfig.votePercentage);
         if (!projection || projection.length === 0) throw new Error("No pool data available to execute vote.");
 
-        let poolsToVoteFor = [];
+        let poolsToVoteFor =[];
         let estimatedTotalRewardValue = 0; 
 
         if (autovoterConfig.voteStrategy === 'optimized') {
@@ -461,76 +515,60 @@ async function executeVote() {
         console.log(`Targeting ${poolsToVoteFor.length} pools: ${poolNames.join(', ')}`);
         broadcast({ type: 'autovoter_status', message: `Voting for: ${poolNames.join(', ')}` });
         
-        let successfulHashes = [];
+        let successfulHashes =[];
         const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
         const currentTimestamp = Math.floor(Date.now() / 1000);
 
         let currentNonce = await autovoterConfig.signer.getNonce("latest");
-
-        const BATCH_SIZE = 2; 
         const tokenIds = autovoterConfig.tokenIds;
 
-        for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
-            const batch = tokenIds.slice(i, i + BATCH_SIZE);
-            console.log(`Processing Batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.join(', ')})...`);
-
-            const votePromises = batch.map(async (tokenId, index) => {
-                try {
-                    const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
-                    
-                    if (totalVotingPower === 0n) {
-                        console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
-                        return null;
-                    }
-
-                    const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
-                    const weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
-                    const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
-                    const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
-
-                    const txNonce = currentNonce + index; 
-
-                    console.log(`Voting ID ${tokenId} (Nonce: ${txNonce})...`);
-                    
-                    const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution, {
-                        nonce: txNonce
-                    });
-                    
-                    return tx; 
-                } catch (err) {
-                    console.error(`Error preparing vote for ID ${tokenId}: ${err.message}`);
-                    return null;
-                }
-            });
-
-            const sentTxs = await Promise.all(votePromises);
-
-            currentNonce += batch.length;
-
-            const validTxs = sentTxs.filter(tx => tx !== null);
-            if (validTxs.length > 0) {
-                broadcast({ type: 'autovoter_status', message: `Waiting for ${validTxs.length} txs to confirm...` });
+        for (let i = 0; i < tokenIds.length; i++) {
+            const tokenId = tokenIds[i];
+            try {
+                const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
                 
-                await Promise.all(validTxs.map(async (tx) => {
-                    try {
-                        await tx.wait();
-                        successfulHashes.push(tx.hash);
-                        console.log(`✅ Confirmed: ${tx.hash}`);
-                    } catch (e) {
-                        console.error(`❌ Tx Failed: ${e.message}`);
-                    }
-                }));
+                if (totalVotingPower === 0n) {
+                    console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
+                    continue; 
+                }
+
+                const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
+                let weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
+                
+                if (weightPerPool === 0n) weightPerPool = 1n; 
+                
+                const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
+                const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
+
+                console.log(`Voting ID ${tokenId} (Nonce: ${currentNonce})...`);
+                
+                const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution, {
+                    nonce: currentNonce
+                });
+                
+                currentNonce++; 
+                
+                broadcast({ type: 'autovoter_status', message: `Vote Tx sent for ID ${tokenId}. Waiting for confirmation...` });
+                
+                await tx.wait(); 
+                successfulHashes.push(tx.hash);
+                console.log(`✅ Confirmed: ${tx.hash}`);
+
+            } catch (err) {
+                console.error(`❌ Error preparing/sending vote for ID ${tokenId}: ${err.shortMessage || err.message}`);
             }
+        }
+
+        if (successfulHashes.length === 0) {
+            throw new Error("All vote transactions failed or reverted.");
         }
 
         broadcast({ type: 'autovoter_status', message: `SUCCESS! All votes processed.` });
         
-        let finalHashLabel = 'Multiple-NFTs';
-        if (successfulHashes.length === 1) finalHashLabel = successfulHashes[0];
-
+        let finalHashLabel = successfulHashes.length === 1 ? successfulHashes[0] : 'Multiple-NFTs';
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
         
-    } catch (error) {
+   } catch (error) {
         console.error("VOTE EXECUTION FAILED:", error);
         lastEpochVoted = null; 
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
@@ -653,7 +691,7 @@ async function scanWalletBalances(userAddress) {
 
     for (const tokenAddr of tokensToCheck) {
         try {
-            const tokenContract = new ethers.Contract(tokenAddr, abi.erc20, provider);
+const tokenContract = new ethers.Contract(tokenAddr, abi.erc20, getNextProvider());
             
             const balance = await tokenContract.balanceOf(userAddress);
             
@@ -816,39 +854,51 @@ ws.send(JSON.stringify({ type: 'autovoter_config_status', data: getSafeConfig() 
     ws.send(JSON.stringify({ type: 'epoch_history_update', data: epochHistory }));
 
     ws.on('close', () => console.log('Client disconnected.'));
+ws.on('error', (err) => console.error('WebSocket error:', err.message));
 
     ws.on('message', async (message) => {
         try {
             const parsed = JSON.parse(message);
             const bigIntReplacer = (key, value) => typeof value === 'bigint' ? value.toString() : value;
 
-            const saveCurrentSettings = () => {
+         const saveCurrentSettings = () => {
     try {
         const { signer, privateKey, ...settingsToSave } = autovoterConfig;
         
         fs.writeFileSync(settingsFilePath, JSON.stringify(settingsToSave, null, 2), 'utf8');
-        console.log("Settings saved to settings.json (Private Key excluded)");
+        console.log("UI Settings saved to settings.json (Private Key excluded)");
     } catch (error) {
         console.error("Error saving settings:", error);
     }
 };
 
 if (parsed.type === 'save_settings') {
-    const { privateKey, tokenId, votePercentage, scanMode } = parsed.data; 
+    const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchDelayMs } = parsed.data; 
 
     try {
         const percent = parseFloat(votePercentage);
         if (isNaN(percent) || percent < 0 || percent > 100) throw new Error("Invalid percentage.");       
+        
         if (privateKey && privateKey.trim() !== "") {
             try {
                 const wallet = new ethers.Wallet(privateKey, provider);
-                autovoterConfig.privateKey = privateKey;
                 autovoterConfig.signer = wallet;
-                console.log(`Wallet updated via UI: ${wallet.address}`);
+                
+                updateEnvFile('PRIVATE_KEY', privateKey);
+                
+                console.log(`Private Key updated in .env for address: ${wallet.address}`);
             } catch (e) {
-                throw new Error("The provided Private Key is invalid.");
+                throw new Error("Invalid Private Key format.");
             }
         }
+
+        if (rpcUrl && rpcUrl !== autovoterConfig.rpcUrl) {
+            autovoterConfig.rpcUrl = rpcUrl;
+            initBlockchain(rpcUrl);
+        }
+
+        autovoterConfig.batchSize = parseInt(batchSize) || 7;
+        autovoterConfig.fetchDelayMs = parseInt(fetchDelayMs) || 1000;
 
         const ids = tokenId.toString().split(',').map(id => id.trim()).filter(id => id !== '');
         autovoterConfig.tokenIds = ids; 
@@ -856,28 +906,20 @@ if (parsed.type === 'save_settings') {
         autovoterConfig.votePercentage = percent;
         autovoterConfig.scanMode = scanMode || 'scheduled';
 
-        const statusMsg = ids.length > 0 
-            ? `Settings saved for ${ids.length} NFTs.` 
-            : `Settings saved (Watch-Only mode).`;
-
-        console.log(`${statusMsg} Mode: ${autovoterConfig.scanMode}`);
-        
         saveCurrentSettings(); 
         
         ws.send(JSON.stringify({ 
             type: 'settings_response', 
             success: true, 
-            message: statusMsg + " (Note: Update .env for permanent key storage)" 
+            message: "Settings updated! (Key stored in .env)" 
         }));
 
         broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
 
     } catch (e) {
-        const errorMessage = `Error: ${e.message}`;
-        ws.send(JSON.stringify({ type: 'settings_response', success: false, message: errorMessage }));
+        ws.send(JSON.stringify({ type: 'settings_response', success: false, message: e.message }));
     }
-}
-			
+}	
             else if (parsed.type === 'toggle_auto_compound') {
                 const { enabled, intervalHours, targetToken } = parsed.data;
 
@@ -1382,13 +1424,14 @@ async function getPoolTVLs(poolAddresses) {
     return tvls;
 }
 
-async function getTokenInfo(address) {
+async function getTokenInfo(address, customProvider = null) {
     if (tokenInfoCache[address]) return tokenInfoCache[address];
 
     const maxRetries = 3;
     for (let i = 0; i < maxRetries; i++) {
         try {
-            const contract = new ethers.Contract(address, abi.erc20, provider);
+            const p = customProvider || getNextProvider();
+            const contract = new ethers.Contract(address, abi.erc20, p);
             const [symbol, decimals] = await Promise.all([contract.symbol(), contract.decimals()]);
             const result = { symbol, decimals: Number(decimals) };
             tokenInfoCache[address] = result;
@@ -1403,13 +1446,14 @@ async function getTokenInfo(address) {
     return { symbol: "UNKNOWN", decimals: 18 };
 }
 
-async function getPoolName(address) {
-    const maxRetries = 3;
+async function getPoolName(address, customProvider = null) {
+    const maxRetries = 1;
     for (let i = 0; i < maxRetries; i++) {
         try {
-            const contract = new ethers.Contract(address, abi.pair, provider);
+            const p = customProvider || getNextProvider();
+            const contract = new ethers.Contract(address, abi.pair, p);
             const [token0Addr, token1Addr] = await Promise.all([contract.token0(), contract.token1()]);
-            const [token0, token1] = await Promise.all([getTokenInfo(token0Addr), getTokenInfo(token1Addr)]);
+            const [token0, token1] = await Promise.all([getTokenInfo(token0Addr, p), getTokenInfo(token1Addr, p)]);
             return `${token0.symbol}/${token1.symbol}`;
         } catch (e) {
             console.warn(`Attempt ${i + 1} failed to get pool name for ${address}. Retrying...`);
@@ -1421,13 +1465,14 @@ async function getPoolName(address) {
     return "Unknown Pool";
 }
 
+
 // =================================================================================
 // --- DATA FETCHING (SMART SCANNABLE) ---
 // =================================================================================
+
 async function fetchData(specificPoolAddresses = null) {
     try {
         const currentTimestamp = Math.floor(Date.now() / 1000);
-        
         
         const epochDuration = 60 * 60 * 24 * 7;
         let targetEpoch = Math.floor(currentTimestamp / epochDuration) * epochDuration;
@@ -1435,20 +1480,17 @@ async function fetchData(specificPoolAddresses = null) {
 
         const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
 
-        
-        const [totalVotingPower, weeklyEmissions, epochVoteEnd, poolCountBigInt] = await Promise.all([
+        const[totalVotingPower, weeklyEmissions, epochVoteEnd, poolCountBigInt] = await Promise.all([
             voterContract.totalWeight(), 
             minterContract.weekly(),
             voterContract.epochVoteEnd(currentTimestamp), 
             voterContract.length()
         ]);
 
-        
-        let poolListToProcess = [];
+        let poolListToProcess =[];
         if (specificPoolAddresses && specificPoolAddresses.length > 0) {
             poolListToProcess = specificPoolAddresses; 
         } else {
-            
             const poolCount = Number(poolCountBigInt);
             poolListToProcess = Array.from({length: poolCount}, (_, i) => i);
         }
@@ -1456,39 +1498,45 @@ async function fetchData(specificPoolAddresses = null) {
         console.log(`Fetching data for ${poolListToProcess.length} pools...`);
         broadcast({ type: 'status', message: `Scanning ${poolListToProcess.length} pools...` });
 
-        const allPoolData = [];
+        const allPoolData =[];
         let requiredTokenAddresses = new Set([AERO_ADDRESS]);
         
-        const batchSize = 7; 
+        const requestsPerRpc = 7;
+        const activeProvidersCount = providers.length > 0 ? providers.length : 1;
+        const batchSize = activeProvidersCount * requestsPerRpc; 
 
         for (let i = 0; i < poolListToProcess.length; i += batchSize) {
-            const batchPromises = [];
+            const batchPromises =[];
             const endIndex = Math.min(i + batchSize, poolListToProcess.length);
 
             for (let j = i; j < endIndex; j++) {
+                const p = providers.length > 0 ? providers[j % providers.length] : provider;
+
                 batchPromises.push(
                     (async () => {
                         try {
+                            const localVoterContract = new ethers.Contract(config.voterAddress, abi.voter, p);
+
                             let poolAddress;
-                            
                             if (specificPoolAddresses) {
                                 poolAddress = poolListToProcess[j];
                             } else {
-                                poolAddress = await voterContract.pools(poolListToProcess[j]);
+                                poolAddress = await localVoterContract.pools(poolListToProcess[j]);
                             }
 
-                            const gaugeAddress = await voterContract.gauges(poolAddress);
+                            const gaugeAddress = await localVoterContract.gauges(poolAddress);
                             if (gaugeAddress === ethers.ZeroAddress) return null;
                             
-                            const isGaugeAlive = await voterContract.isAlive(gaugeAddress);
+                            const isGaugeAlive = await localVoterContract.isAlive(gaugeAddress);
                             if (!isGaugeAlive) return null;
 
-                            const votingPower = await voterContract.weights(poolAddress);
-                            const name = await getPoolName(poolAddress);
+                            const votingPower = await localVoterContract.weights(poolAddress);
                             
-                            const [feeAddr, bribeAddr] = await Promise.all([
-                                voterContract.gaugeToFees(gaugeAddress), 
-                                voterContract.gaugeToBribe(gaugeAddress)
+                            const name = await getPoolName(poolAddress, p); 
+                            
+                            const[feeAddr, bribeAddr] = await Promise.all([
+                                localVoterContract.gaugeToFees(gaugeAddress), 
+                                localVoterContract.gaugeToBribe(gaugeAddress)
                             ]);
                             
                             const poolInfo = { 
@@ -1504,13 +1552,13 @@ async function fetchData(specificPoolAddresses = null) {
                             const processRewards = async (contractAddress, rewardType) => {
                                 if (contractAddress === ethers.ZeroAddress) return;
                                 try {
-                                    const contract = new ethers.Contract(contractAddress, abi.rewardContract, provider);
+                                    const contract = new ethers.Contract(contractAddress, abi.rewardContract, p);
                                     const rewardsCount = await contract.rewardsListLength();
                                     const limit = Number(rewardsCount) > 10 ? 10 : Number(rewardsCount);
 
                                     for (let k = 0; k < limit; k++) {
                                         const tokenAddress = await contract.rewards(k);
-                                        const [amountCurrent, amountPrev] = await Promise.all([
+                                        const[amountCurrent, amountPrev] = await Promise.all([
                                             contract.tokenRewardsPerEpoch(tokenAddress, targetEpoch),
                                             contract.tokenRewardsPerEpoch(tokenAddress, prevEpoch)
                                         ]);
@@ -1518,7 +1566,7 @@ async function fetchData(specificPoolAddresses = null) {
                                         const totalAmount = amountCurrent + amountPrev;                                                                           
                                         
                                         if (totalAmount > 0n || rewardType === "fees") {
-                                            const { symbol, decimals } = await getTokenInfo(tokenAddress);
+                                            const { symbol, decimals } = await getTokenInfo(tokenAddress, p); 
                                             poolInfo[rewardType][tokenAddress.toLowerCase()] = { amount: totalAmount, decimals, symbol };
                                             requiredTokenAddresses.add(tokenAddress.toLowerCase());
                                             knownTokenAddresses.add(tokenAddress); 
@@ -1537,9 +1585,14 @@ async function fetchData(specificPoolAddresses = null) {
             const batchResults = await Promise.all(batchPromises);
             batchResults.forEach(pool => { if (pool) allPoolData.push(pool); });
             
-            broadcast({ type: 'scanning_progress', data: { scanned: endIndex, total: poolListToProcess.length, active: allPoolData.length } });
+            broadcast({ 
+                type: 'scanning_progress', 
+                data: { scanned: endIndex, total: poolListToProcess.length, active: allPoolData.length } 
+            });
+
+            console.log(`Scanning... [${endIndex}/${poolListToProcess.length}] | ${allPoolData.length} active pools found.`);
             
-await sleep(1700);
+            await sleep(autovoterConfig.fetchDelayMs || 1200);
         }
 
         const poolAddresses = allPoolData.map(p => p.address);
@@ -1549,11 +1602,11 @@ await sleep(1700);
         ]);
         const aeroPrice = prices[AERO_ADDRESS] || 0;
 
-        const finalPools = [];
+        const finalPools =[];
         let totalFeesUSD = 0, totalBribesUSD = 0;
 
         for (const pool of allPoolData) {
-            const calculateValue = (rewards) => Object.entries(rewards).reduce((total, [address, { amount, decimals }]) => {
+            const calculateValue = (rewards) => Object.entries(rewards).reduce((total,[address, { amount, decimals }]) => {
                 const price = prices[address] || 0;
                 return total + (Number(ethers.formatUnits(amount, decimals)) * price);
             }, 0);
@@ -1597,7 +1650,6 @@ await sleep(1700);
         return null;
     }
 }
-
 // =================================================================================
 // --- HELPER FUNCTIONS FOR AUTO-PILOT ---
 // =================================================================================
@@ -1650,6 +1702,9 @@ async function performRebase(signer, tokenIds) {
     return lastTx; 
 }
 
+// =================================================================================
+// --- AUTO-PILOT REWARDS CLAIMING ---
+// =================================================================================
 async function performClaimBribes(signer, tokenIds, pools) {
     console.log("--------------------------------------------------");
     console.log("🚀 AUTO-PILOT: Starting Reward Claim Sequence...");
@@ -1665,7 +1720,10 @@ async function performClaimBribes(signer, tokenIds, pools) {
     }
 
     const ids = Array.isArray(tokenIds) ? tokenIds : [tokenIds];
+    
+    // Write transactions will still route through the primary signer to prevent nonce issues
     const voterWithSigner = voterContract.connect(signer);
+    
     let lastTx = null;
     let totalUsdRealizedAcrossAllNfts = 0;
 
@@ -1674,15 +1732,16 @@ async function performClaimBribes(signer, tokenIds, pools) {
             console.log(`🔍 Scanning Rewards for Token ID: ${id}...`);
             broadcast({ type: 'swap_status', message: `Scanning rewards for ID ${id}...` });
 
-            const bribeAddresses = [];
+            const bribeAddresses =[];
             const bribeTokens = [];
             const feeAddresses = [];
-            const feeTokens = [];            
+            const feeTokens =[];            
 
             for (const pool of pools) {
+                
                 if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress) {
-                    const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, provider);
-                    const tokensFound = [];                   
+                    const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, getNextProvider());
+                    const tokensFound =[];                   
                     const potentialTokens = Object.keys(pool.fees);
                     
                     for (const tokenAddr of potentialTokens) {
@@ -1706,9 +1765,10 @@ async function performClaimBribes(signer, tokenIds, pools) {
                     }
                 }
 
+
                 if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress) {
-                    const contract = new ethers.Contract(pool.bribeAddress, abi.rewardContract, provider);
-                    const tokensFound = [];
+                    const contract = new ethers.Contract(pool.bribeAddress, abi.rewardContract, getNextProvider());
+                    const tokensFound =[];
                     const potentialTokens = Object.keys(pool.bribes);
 
                     for (const tokenAddr of potentialTokens) {
@@ -1808,7 +1868,26 @@ function initSniper() {
         }
     }, 5000);
 }
+function updateEnvFile(key, value) {
+    const envPath = './.env';
+    let envContent = '';
+    
+    if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+    }
 
+    const newEntry = `${key}=${value}`;
+    const regex = new RegExp(`^${key}=.*`, 'm');
+
+    if (regex.test(envContent)) {
+        envContent = envContent.replace(regex, newEntry);
+    } else {
+        envContent += `\n${newEntry}`;
+    }
+
+    fs.writeFileSync(envPath, envContent.trim() + '\n');
+    process.env[key] = value;
+}
 // =================================================================================
 // --- ENGINE 2: THE SMART SCANNER (Full Discovery -> Targeted Updates) ---
 // =================================================================================
@@ -1857,7 +1936,7 @@ async function startContinuousScanner() {
                     }
                     
 
-                    const WAKE_UP_WINDOW = 960; 
+                    const WAKE_UP_WINDOW = 1200; 
 
                     if (timeRemaining > WAKE_UP_WINDOW) {
     const minsToWait = Math.floor((timeRemaining - WAKE_UP_WINDOW) / 60);
@@ -1911,7 +1990,7 @@ async function startContinuousScanner() {
             }
 
         } catch (error) {
-            console.error("❌ Scanner crashed (likely RPC limit). Pause for 60s...", error.message);
+            console.error("❌ Scanner crashed (likely RPC limit). Pause for 10s...", error.message);
             isFetching = false;
             await sleep(10000); 
         }
