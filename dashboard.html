@@ -632,7 +632,7 @@
         <section class="pixel-panel">
             <h2 style="margin-top:0; color: var(--accent-color);">Bot & Simulation Configuration</h2>
             <p class="autovoter-warning">
-                <strong>IMPORTANT:</strong> The private key is for the auto-voter only. It is only stored in the current session.
+                <strong>IMPORTANT:</strong> Get Paid/Free Tier RPC, DO NOT RELAY ON FREE RPC.
             </p>
             <div class="settings-form">
                 <div class="form-group">
@@ -648,7 +648,7 @@
 <div class="form-group">
     <label>Bot Scan Mode</label>
     <div class="strategy-selector button-group" id="scan-mode-selector">
-        <button type="button" id="mode-scheduled-btn" class="active" data-mode="scheduled">Scheduled (15m before Epoch)</button>
+        <button type="button" id="mode-scheduled-btn" class="active" data-mode="scheduled">Scheduled (20m before Epoch)</button>
         <button type="button" id="mode-immediate-btn" class="inactive" data-mode="immediate">Immediate (Continuous)</button>
     </div>
     <div style="font-size: 0.8rem; color: var(--text-secondary-color); margin-top: 5px;">
@@ -688,16 +688,38 @@
                             <button id="strategy-diversified-btn" data-strategy="diversified">Diversify (Manual)</button>
                             <button id="strategy-single-btn" data-strategy="single">Best Single Pool</button>
                         </div>
+						            <div id="settings-status">Status: Not configured.</div>
+									<div id="autovoter-ui-status"></div>
+            <div id="venft-details"></div>
+
                     </div>
                     <div class="form-group" id="diversification-options" style="display: none;">
                         <label for="diversification-pools-input">Number of Pools to Vote For</label>
                         <input type="number" id="diversification-pools-input" value="3" min="2">
                     </div>
                 </div>
+                <div class="pixel-panel" style="margin-top: 20px; border-left: 5px solid var(--accent-color); background: rgba(0,0,0,0.1);">
+                    <h2 style="margin-top:0; color: var(--accent-color);">Advanced Network Settings</h2>
+                    <p style="font-size: 0.8rem; color: var(--text-secondary-color);">Adjust these if you are getting rate-limited or want faster pool scanning.</p>
+                    
+                    <div class="form-group">
+    <label for="rpc-urls">Base Network RPC URLs (Comma separated for Load Balancing)</label>
+    <textarea id="rpc-urls" rows="3" placeholder="YOUR_PAID_RPC_URL,&#10;https://base.meowrpc.com,&#10;https://base-mainnet.public.blastapi.io" style="font-family: monospace; background-color: #2d4341; border: 2px solid black; color: var(--text-color); padding: 10px; font-size: 1rem; outline: none; width: 100%; resize: vertical;"></textarea>
+</div>
+                    
+                    <div style="display: flex; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
+                        <div class="form-group" style="flex:1;">
+                            <label for="batch-size">Scan Batch Size (Pools)</label>
+                            <input type="number" id="batch-size" value="7" min="1" max="50">
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label for="fetch-delay">Delay Between Batches (Seconds)</label>
+                            <input type="number" id="fetch-delay" value="1.7" min="0.1" step="0.1">
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div id="settings-status">Status: Not configured.</div>
-            <div id="autovoter-ui-status"></div>
-            <div id="venft-details"></div>
+            
 <div class="pixel-panel" style="margin-top: 20px; border-left: 5px solid var(--accent-color); background: rgba(0,0,0,0.1);">
     <h2 style="margin-top:0; color: var(--accent-color);">Auto-Compound & Rewards</h2>
     
@@ -1055,6 +1077,12 @@ case 'swap_status':
                      const strategyBtns = document.querySelectorAll('.strategy-selector button');
                      const divOptions = document.getElementById('diversification-options');
                      const divInput = document.getElementById('diversification-pools-input');
+if (config.rpcUrls || config.rpcUrl) {
+    const urls = config.rpcUrls || config.rpcUrl;
+    document.getElementById('rpc-urls').value = Array.isArray(urls) ? urls.join(',\n') : urls;
+}
+                     if (config.batchSize) document.getElementById('batch-size').value = config.batchSize;
+                     if (config.fetchDelayMs) document.getElementById('fetch-delay').value = (config.fetchDelayMs / 1000).toFixed(1);
 
                      if (config.enabled) {
                          btn.textContent = 'Disable Auto-Voter';
@@ -1621,29 +1649,34 @@ document.getElementById('swap-btn').addEventListener('click', () => {
     }
 });
                     saveBtn.addEventListener('click', () => {
-    const privateKey = privateKeyInput.value.trim();
-    const simInputs = validateSimInputs();
-    if (!simInputs) return;
-    
-    let selectedMode = 'scheduled';
-    if(document.getElementById('mode-immediate-btn').classList.contains('active')) {
-        selectedMode = 'immediate';
-    }
+                        const privateKey = privateKeyInput.value.trim();
+                        const simInputs = validateSimInputs();
+                        if (!simInputs) return;
+                        
+                        let selectedMode = 'scheduled';
+                        if(document.getElementById('mode-immediate-btn').classList.contains('active')) {
+                            selectedMode = 'immediate';
+                        }
 
-    if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
-        return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
-    }
-    
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({ 
-            type: 'save_settings', 
-            data: { privateKey, ...simInputs, scanMode: selectedMode } 
-        }));
-        settingsStatusEl.textContent = 'Status: Sending to server...';
-        settingsStatusEl.style.color = 'var(--text-secondary-color)';
-    }
-    else alert('WebSocket is not connected. Please wait for a connection.');
-});
+const rawRpcUrls = document.getElementById('rpc-urls').value.trim();
+const rpcUrl = rawRpcUrls.replace(/\n/g, '').replace(/\s+/g, '');
+                        const batchSize = parseInt(document.getElementById('batch-size').value, 10);
+                        const fetchDelayMs = parseFloat(document.getElementById('fetch-delay').value) * 1000;
+
+                        if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
+                            return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
+                        }
+                        
+                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                            this.socket.send(JSON.stringify({ 
+                                type: 'save_settings', 
+                                data: { privateKey, ...simInputs, scanMode: selectedMode, rpcUrl, batchSize, fetchDelayMs } 
+                            }));
+                            settingsStatusEl.textContent = 'Status: Sending to server...';
+                            settingsStatusEl.style.color = 'var(--text-secondary-color)';
+                        }
+                        else alert('WebSocket is not connected. Please wait for a connection.');
+                    });
 
 
                     toggleAutovoterBtn.addEventListener('click', () => {
