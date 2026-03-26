@@ -9,8 +9,8 @@ services:
     env_file:
       - ./.env
     volumes:
-      - ./settings.json:/app/settings.json:ro
-      - ./transactions.json:/app/transactions.json:ro
-      - ./epochs.json:/app/epochs.json:ro
+      - ./settings.json:/app/settings.json
+      - ./transactions.json:/app/transactions.json
+      - ./epochs.json:/app/epochs.json
       - ./screenshots:/app/screenshots
     restart: always
