@@ -9,9 +9,11 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install --production
 
-# Copy only the application entry point to avoid including local env/state files
-COPY server.js ./
+# Copy application entry point and static assets required by the server
+COPY server.js dashboard.html aero.png background-sprite.png ./
 
+# Create any required application directories (e.g., for screenshots)
+RUN mkdir -p /app/screenshots
 # Expose the port the app runs on
 EXPOSE 3000
 
