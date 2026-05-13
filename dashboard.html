@@ -518,7 +518,10 @@
     </main>
     <main id="pools-view" class="container">
         <section class="summary-grid" id="summary-section"></section>
-        
+       <div style="background: rgba(0,0,0,0.2); border: 2px solid black; padding: 6px 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; font-size: 0.8rem;">
+    <span style="color: var(--text-secondary-color);">Loaded veAERO NFTs:</span>
+    <span id="loaded-nfts-display" style="display: flex; gap: 8px; flex-wrap: wrap;">None</span>
+</div>
         <section class="pixel-panel">
             <h2 style="margin-top:0;">Bot Status</h2>
             <div id="autovoter-status" style="font-size: 1.1rem; color: var(--accent-color);">Awaiting configuration in the Settings tab.</div>
@@ -1077,6 +1080,32 @@ case 'swap_status':
                      const strategyBtns = document.querySelectorAll('.strategy-selector button');
                      const divOptions = document.getElementById('diversification-options');
                      const divInput = document.getElementById('diversification-pools-input');
+const nftsDisplay = document.getElementById('loaded-nfts-display');
+
+const aeroLogo = "https://dd.dexscreener.com/ds-data/tokens/base/0x940181a94a35a4569e4529a3cdfb74e38fd98631.png";
+
+const createNftBadge = (id) => {
+    return `<span style="display: inline-flex; align-items: center; gap: 4px; background: #2d4341; padding: 2px 6px; border: 2px solid #000; color: var(--accent-color);">
+        <img src="${aeroLogo}" style="width: 12px; height: 12px; border-radius: 50%;">
+        #${id.trim()}
+    </span>`;
+};
+
+if (nftsDisplay) {
+    let ids = config.tokenIds || config.tokenId;
+    
+    let idArray = [];
+    if (Array.isArray(ids)) idArray = ids;
+    else if (typeof ids === 'string' && ids.trim() !== "") idArray = ids.split(',');
+
+    if (idArray.length > 0) {
+        nftsDisplay.innerHTML = idArray.map(id => createNftBadge(id)).join('');
+    } else {
+        nftsDisplay.textContent = "None loaded";
+        nftsDisplay.style.color = "var(--status-disconnected-color)";
+    }
+}
+
 if (config.rpcUrls || config.rpcUrl) {
     const urls = config.rpcUrls || config.rpcUrl;
     document.getElementById('rpc-urls').value = Array.isArray(urls) ? urls.join(',\n') : urls;
