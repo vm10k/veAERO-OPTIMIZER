@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-    rpcUrls:[
+     rpcUrls:[
         "GET FREE TIER RPC FROM ALCHEMY",        
         "GET FREE TIER RPC FROM ANKR",      
 		"GET FREE TIER RPC FROM TENDERLY",      
@@ -920,32 +920,27 @@ if (parsed.type === 'save_settings') {
         ws.send(JSON.stringify({ type: 'settings_response', success: false, message: e.message }));
     }
 }	
-            else if (parsed.type === 'toggle_auto_compound') {
-                const { enabled, intervalHours, targetToken } = parsed.data;
+           else if (parsed.type === 'toggle_auto_compound') {
+                const { enabled, delayHours, targetToken } = parsed.data;
 
-               
                 if (compoundIntervalTimer) {
                     clearInterval(compoundIntervalTimer);
                     compoundIntervalTimer = null;
                 }
 
                 if (enabled) {
-                    console.log(`AUTO-PILOT ACTIVATED: Every ${intervalHours} hours.`);
+                    console.log(`AUTO-PILOT ACTIVATED: Triggering ${delayHours} hours after Epoch flip.`);
                     ws.send(JSON.stringify({ type: 'status', message: 'Auto-Pilot Activated' }));
                     
-                    
-
-const runAutoSequence = async () => {
+                    const runAutoSequence = async () => {
                         console.log("⏰ Auto-Pilot Triggered");
                         ws.send(JSON.stringify({ type: 'swap_status', message: '🚀 Auto-Pilot Running...' }));
 
                         try {
                             if (!autovoterConfig.signer) throw new Error("Wallet not configured in settings.");
 
-                           
                             try {
                                 const tx = await performRebase(autovoterConfig.signer, autovoterConfig.tokenId);
-                              
                                 if (tx) {
                                     await tx.wait();
                                     ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rebase Complete' }));
@@ -954,10 +949,8 @@ const runAutoSequence = async () => {
                                 }
                             } catch(e) { console.log("Rebase skip:", e.message); }
 
-                           
                             try {
                                 const tx = await performClaimBribes(autovoterConfig.signer, autovoterConfig.tokenId, latestFetchedData.pools);
-                               
                                 if (tx) {
                                     await tx.wait();
                                     ws.send(JSON.stringify({ type: 'swap_status', message: '✅ Rewards Claimed' }));
@@ -967,24 +960,18 @@ const runAutoSequence = async () => {
                                 }
                             } catch(e) { 
                                 console.log("Claim skip:", e.message); 
-                                
                             }
 
-                           
                             const balances = await scanWalletBalances(autovoterConfig.signer.address);
-                            
                             if(balances.length > 0) {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `Swapping ${balances.length} tokens...` }));
-                                
-                                
                                 const count = await executeOdosSwap(balances, targetToken);
-                                
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `✅ Auto-Swap: ${count} tokens swapped.` }));
                             } else {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: 'No tokens found to swap.' }));
                             }
 
-                            ws.send(JSON.stringify({ type: 'swap_status', message: `💤 Sleeping for ${intervalHours} hours...` }));
+                            ws.send(JSON.stringify({ type: 'swap_status', message: `💤 Sleeping until next epoch flip...` }));
 
                         } catch (e) {
                             console.error("Auto-Pilot Error:", e);
@@ -992,11 +979,27 @@ const runAutoSequence = async () => {
                         }
                     };
                     
-                    runAutoSequence();
-
                     
-                    const ms = parseFloat(intervalHours) * 60 * 60 * 1000;
-                    compoundIntervalTimer = setInterval(runAutoSequence, ms);
+                    const checkAndRunAutoPilot = async () => {
+                        if (!latestFetchedData.summary.epochVoteEnd) return;
+                        const now = Math.floor(Date.now() / 1000);
+                        
+                        
+                        const currentEpochStart = latestFetchedData.summary.epochVoteEnd - 604800;
+                        const executionTime = currentEpochStart + (parseFloat(delayHours) * 3600);
+
+                        if (now >= executionTime) {
+                            
+                            if (!autovoterConfig.lastAutoPilotEpochEnd || autovoterConfig.lastAutoPilotEpochEnd < currentEpochStart) {
+                                autovoterConfig.lastAutoPilotEpochEnd = currentEpochStart;
+                                saveCurrentSettings(); 
+                                await runAutoSequence();
+                            }
+                        }
+                    };
+
+                    checkAndRunAutoPilot();
+                    compoundIntervalTimer = setInterval(checkAndRunAutoPilot, 60000); // Check time every 60s
 
                 } else {
                     console.log("AUTO-PILOT STOPPED.");
@@ -1081,7 +1084,22 @@ const runAutoSequence = async () => {
                     const feeTokens = [];
                     let totalRealizedUSD = 0;
 
+                    const votedPools = [];
                     for (const pool of latestFetchedData.pools) {
+                        let hasVote = false;
+                        for (const id of autovoterConfig.tokenIds) {
+                            try {
+                                const voteWeight = await voterContract.votes(id, pool.address);
+                                if (voteWeight > 0n) {
+                                    hasVote = true; break;
+                                }
+                            } catch(e) {}
+                        }
+                        if (hasVote) votedPools.push(pool);
+                    }
+                    console.log(`🛡️ Smart Scan: Reduced ${latestFetchedData.pools.length} total pools to ${votedPools.length} voted pools.`);
+
+                    for (const pool of votedPools) {
                         if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress) {
                             const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, provider);
                             const tokensFound = [];
@@ -1720,8 +1738,20 @@ async function performClaimBribes(signer, tokenIds, pools) {
     }
 
     const ids = Array.isArray(tokenIds) ? tokenIds : [tokenIds];
-    
-    // Write transactions will still route through the primary signer to prevent nonce issues
+    const votedPools = [];
+for (const pool of pools) {
+        let hasVote = false;
+        for (const id of ids) {
+            try {
+                const voteWeight = await voterContract.votes(id, pool.address);
+                if (voteWeight > 0n) {
+                    hasVote = true; break;
+                }
+            } catch(e) {}
+        }
+        if (hasVote) votedPools.push(pool);
+    }
+    console.log(`🛡️ Auto-Pilot Scan: Reduced ${pools.length} total pools to ${votedPools.length} voted pools.`);
     const voterWithSigner = voterContract.connect(signer);
     
     let lastTx = null;
