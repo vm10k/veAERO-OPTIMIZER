@@ -730,10 +730,10 @@
         <h3 style="margin-top:0; color:#ffdd65; font-size:1rem;">Auto-Pilot Configuration</h3>
         
         <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-            <div class="form-group" style="flex:1; min-width:150px;">
-                <label style="color:#a0b0af;">Run Every (Hours)</label>
-                <input type="number" id="auto-interval-input" value="24" min="0.5" step="0.5" style="text-align:center;">
-            </div>
+           <div class="form-group" style="flex:1; min-width:150px;">
+    <label style="color:#a0b0af;">Hours After Epoch Flip</label>
+    <input type="number" id="auto-pilot-delay-input" value="2" min="0" step="0.5" style="text-align:center;">
+</div>
             <div class="form-group" style="flex:2; min-width:200px;">
                 <label style="color:#a0b0af;">Target Token (Receive)</label>
                 <div class="token-picker-container" style="margin-top:0;">
@@ -1483,43 +1483,40 @@ modeBtns.forEach(btn => {
                             this.socket.send(JSON.stringify({ type: 'get_transactions' }));
                         }
                     });
+
 const autoBtn = document.getElementById('toggle-auto-compound-btn');
 const autoStatus = document.getElementById('auto-pilot-status');
 let isAutoRunning = false;
 
 autoBtn.addEventListener('click', () => {
-    const hours = document.getElementById('auto-interval-input').value;
+    const delayHours = document.getElementById('auto-pilot-delay-input').value;
     const target = document.getElementById('target-token-address').value;
 
     if (!target) return alert("Please enter a Target Token Address (e.g., USDC) first.");
 
     if (!isAutoRunning) {
-       
         this.socket.send(JSON.stringify({
             type: 'toggle_auto_compound',
             data: { 
                 enabled: true, 
-                intervalHours: hours, 
+                delayHours: delayHours, 
                 targetToken: target 
             }
         }));
 
-        
         isAutoRunning = true;
         autoBtn.textContent = "STOP AUTO-PILOT";
         autoBtn.style.backgroundColor = "#ff4d4d"; // Red
         autoBtn.style.color = "white";
-        autoStatus.textContent = `🚀 RUNNING: Every ${hours} Hours`;
+        autoStatus.textContent = `🚀 RUNNING: ${delayHours}h after Epoch ends`;
         autoStatus.style.color = "#00ff2a";
         
     } else {
-        
         this.socket.send(JSON.stringify({
             type: 'toggle_auto_compound',
             data: { enabled: false }
         }));
 
-        
         isAutoRunning = false;
         autoBtn.textContent = "START AUTO-PILOT";
         autoBtn.style.backgroundColor = "#ffdd65"; // Yellow
