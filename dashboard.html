@@ -1117,11 +1117,13 @@ if (nftsDisplay) {
     if (Array.isArray(ids)) idArray = ids;
     else if (typeof ids === 'string' && ids.trim() !== "") idArray = ids.split(',');
 
-    if (idArray.length > 0) {
+   if (idArray.length > 0) {
         nftsDisplay.innerHTML = idArray.map(id => createNftBadge(id)).join('');
+        document.getElementById('token-id').value = idArray.join(', ');
     } else {
         nftsDisplay.textContent = "None loaded";
         nftsDisplay.style.color = "var(--status-disconnected-color)";
+        document.getElementById('token-id').value = "";
     }
 }
 
