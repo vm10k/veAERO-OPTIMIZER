@@ -719,6 +719,25 @@
                             <label for="fetch-delay">Delay Between Batches (Seconds)</label>
                             <input type="number" id="fetch-delay" value="1.7" min="0.1" step="0.1">
                         </div>
+						 </div> 
+                      <div style="display: flex; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
+                        <div class="form-group" style="flex:1;">
+                            <label>Swap Router (Aggregator)</label>
+                           <div class="strategy-selector button-group" id="swap-aggregator-selector">
+                                <button type="button" id="agg-kyber-btn" class="active" data-agg="kyber" style="display:flex; align-items:center; gap:8px; padding: 8px 15px;">
+                                    <img src="https://icons.llamao.fi/icons/protocols/kyberswap" style="width:20px; height:20px; border-radius:50%; border: 1px solid #000;" onerror="this.style.display='none'"> 
+                                    KyberSwap
+                                </button>
+                                <button type="button" id="agg-odos-btn" class="inactive" data-agg="odos" style="display:flex; align-items:center; gap:8px; padding: 8px 15px;">
+                                    <img src="https://icons.llamao.fi/icons/protocols/odos" style="width:20px; height:20px; border-radius:50%; border: 1px solid #000;" onerror="this.style.display='none'"> 
+                                    Odos
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label for="slippage-limit">Max Swap Slippage (%)</label>
+                            <input type="number" id="slippage-limit" value="3.0" min="0.1" step="0.1">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1112,7 +1131,18 @@ if (config.rpcUrls || config.rpcUrl) {
 }
                      if (config.batchSize) document.getElementById('batch-size').value = config.batchSize;
                      if (config.fetchDelayMs) document.getElementById('fetch-delay').value = (config.fetchDelayMs / 1000).toFixed(1);
+const agg = config.swapAggregator || 'kyber';
+                    const kyberBtn = document.getElementById('agg-kyber-btn');
+                    const odosBtn = document.getElementById('agg-odos-btn');
+                    if (agg === 'odos') {
+                        odosBtn.classList.add('active'); odosBtn.classList.remove('inactive');
+                        kyberBtn.classList.remove('active'); kyberBtn.classList.add('inactive');
+                    } else {
+                        kyberBtn.classList.add('active'); kyberBtn.classList.remove('inactive');
+                        odosBtn.classList.remove('active'); odosBtn.classList.add('inactive');
+                    }
 
+					if (config.slippageLimitPercent) document.getElementById('slippage-limit').value = config.slippageLimitPercent;
                      if (config.enabled) {
                          btn.textContent = 'Disable Auto-Voter';
                          btn.style.backgroundColor = 'var(--status-connected-color)';
@@ -1443,6 +1473,17 @@ modeBtns.forEach(btn => {
         btn.classList.remove('inactive');
     });
 });
+const aggBtns = document.querySelectorAll('#swap-aggregator-selector button');
+                    aggBtns.forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            aggBtns.forEach(b => {
+                                b.classList.remove('active');
+                                b.classList.add('inactive');
+                            });
+                            btn.classList.add('active');
+                            btn.classList.remove('inactive');
+                        });
+                    });
                     const tabInfo = document.getElementById('tab-info');
                     const tabPools = document.getElementById('tab-pools');
                     const tabSettings = document.getElementById('tab-settings');
@@ -1688,6 +1729,12 @@ const rawRpcUrls = document.getElementById('rpc-urls').value.trim();
 const rpcUrl = rawRpcUrls.replace(/\n/g, '').replace(/\s+/g, '');
                         const batchSize = parseInt(document.getElementById('batch-size').value, 10);
                         const fetchDelayMs = parseFloat(document.getElementById('fetch-delay').value) * 1000;
+                        
+let swapAggregator = 'kyber';
+if(document.getElementById('agg-odos-btn').classList.contains('active')) {
+    swapAggregator = 'odos';
+}
+                        const slippageLimitPercent = parseFloat(document.getElementById('slippage-limit').value);
 
                         if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
                             return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
@@ -1696,8 +1743,9 @@ const rpcUrl = rawRpcUrls.replace(/\n/g, '').replace(/\s+/g, '');
                         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                             this.socket.send(JSON.stringify({ 
                                 type: 'save_settings', 
-                                data: { privateKey, ...simInputs, scanMode: selectedMode, rpcUrl, batchSize, fetchDelayMs } 
+                                data: { privateKey, ...simInputs, scanMode: selectedMode, rpcUrl, batchSize, fetchDelayMs, swapAggregator, slippageLimitPercent } 
                             }));
+							
                             settingsStatusEl.textContent = 'Status: Sending to server...';
                             settingsStatusEl.style.color = 'var(--text-secondary-color)';
                         }
