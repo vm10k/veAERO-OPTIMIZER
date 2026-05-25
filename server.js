@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-     rpcUrls:[
+   rpcUrls:[
         "GET FREE TIER RPC FROM ALCHEMY",        
         "GET FREE TIER RPC FROM ANKR",      
 		"GET FREE TIER RPC FROM TENDERLY",      
@@ -134,7 +134,9 @@ let autovoterConfig = {
     scanMode: 'scheduled',
     rpcUrl: config.rpcUrl, 
     batchSize: 7,
-    fetchDelayMs: 1200
+    fetchDelayMs: 1200,
+	swapAggregator: 'kyber',     
+    slippageLimitPercent: 3.0      
 };
 let isLoopRunning = false;
 
@@ -158,6 +160,8 @@ function loadSettings() {
             autovoterConfig.rpcUrl = savedSettings.rpcUrl || config.rpcUrl;
             autovoterConfig.batchSize = savedSettings.batchSize || 7;
             autovoterConfig.fetchDelayMs = savedSettings.fetchDelayMs || 1000;
+			autovoterConfig.swapAggregator = savedSettings.swapAggregator || 'kyber'; 
+            autovoterConfig.slippageLimitPercent = savedSettings.slippageLimitPercent || 3.0; 
 
             console.log(`Loaded preferences for ${autovoterConfig.tokenIds.length} Token IDs.`);
         } else {
@@ -758,11 +762,16 @@ const tokenContract = new ethers.Contract(tokenAddr, abi.erc20, getNextProvider(
     return results;
 }
 
-async function executeOdosSwap(inputTokens, outputTokenAddress) {
+const NATIVE_KYBER = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+async function executeSwap(inputTokens, outputTokenAddress) {
     if (!autovoterConfig.signer) throw new Error("Wallet not configured. Cannot swap.");
     
     const userAddress = autovoterConfig.signer.address;
-    console.log(`Initiating Odos Swap for ${inputTokens.length} tokens to ${outputTokenAddress}`);
+    const aggregator = autovoterConfig.swapAggregator === 'kyber' ? 'KyberSwap' : 'Odos';
+    const slippage = autovoterConfig.slippageLimitPercent || 3.0;
+    
+    console.log(`Initiating ${aggregator} Swap for ${inputTokens.length} tokens to ${outputTokenAddress}`);
     
     let successCount = 0;
     
@@ -771,54 +780,89 @@ async function executeOdosSwap(inputTokens, outputTokenAddress) {
             const inputAmount = token.amount;
             if (inputAmount === "0") continue;
             
-            console.log(`Swapping ${token.symbol} (${inputAmount}) -> ${outputTokenAddress}`);
-            broadcast({ type: 'swap_status', message: `Swapping ${token.symbol}...` });
+            console.log(`Swapping ${token.symbol} (${inputAmount}) -> ${outputTokenAddress} via ${aggregator}`);
+            broadcast({ type: 'swap_status', message: `Swapping ${token.symbol} via ${aggregator}...` });
 
-            
-            const quoteBody = {
-                chainId: 8453, 
-                inputTokens: [{ tokenAddress: token.address, amount: inputAmount }],
-                outputTokens: [{ tokenAddress: outputTokenAddress, proportion: 1 }],
-                userAddr: userAddress,
-                slippageLimitPercent: 1.0, 
-                referralCode: 0,
-                compact: true
-            };
+            let transaction;
 
-            const quoteReq = await fetch("https://api.odos.xyz/sor/quote/v2", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(quoteBody)
-            });
+            if (autovoterConfig.swapAggregator === 'kyber') {
+                // ==========================================
+                // === KYBERSWAP LOGIC ===
+                // ==========================================
+                const kIn = token.address === ethers.ZeroAddress ? NATIVE_KYBER : token.address;
+                const kOut = outputTokenAddress === ethers.ZeroAddress ? NATIVE_KYBER : outputTokenAddress;
 
-            if(!quoteReq.ok) throw new Error(`Odos Quote Failed: ${quoteReq.statusText}`);
-            const quoteData = await quoteReq.json();
-            
-            
-            const txReq = await fetch("https://api.odos.xyz/sor/assemble", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userAddr: userAddress, pathId: quoteData.pathId, simulate: false })
-            });
-            
-            if(!txReq.ok) throw new Error(`Odos Assemble Failed: ${txReq.statusText}`);
-            const txData = await txReq.json();
-            
-            const transaction = txData.transaction;
-            
-            
+                const quoteRes = await fetch(`https://aggregator-api.kyberswap.com/base/api/v1/routes?tokenIn=${kIn}&tokenOut=${kOut}&amountIn=${inputAmount}&gasInclude=true`);
+                const quoteData = await quoteRes.json();
+                if (quoteData.code !== 0) throw new Error(`Kyber Quote Failed: ${quoteData.message}`);
+
+                const routeSummary = quoteData.data.routeSummary;
+
+                const txRes = await fetch(`https://aggregator-api.kyberswap.com/base/api/v1/route/build`, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        routeSummary, 
+                        sender: userAddress, 
+                        recipient: userAddress, 
+                        slippageTolerance: Math.floor(parseFloat(slippage) * 100) // Kyber uses BPS (3.0% = 300)
+                    })
+                });
+                const txData = await txRes.json();
+                if (txData.code !== 0) throw new Error(`Kyber Build Failed: ${txData.message}`);
+
+                transaction = {
+                    to: txData.data.routerAddress,
+                    data: txData.data.data,
+                    value: (routeSummary.tokenIn.toLowerCase() === NATIVE_KYBER.toLowerCase() ? routeSummary.amountIn : "0")
+                };
+
+            } else {
+                // ==========================================
+                // === ODOS LOGIC ===
+                // ==========================================
+                const quoteBody = {
+                    chainId: 8453, 
+                    inputTokens: [{ tokenAddress: token.address, amount: inputAmount }],
+                    outputTokens: [{ tokenAddress: outputTokenAddress, proportion: 1 }],
+                    userAddr: userAddress,
+                    slippageLimitPercent: parseFloat(slippage),
+                    referralCode: 0,
+                    compact: true
+                };
+
+                const quoteReq = await fetch("https://api.odos.xyz/sor/quote/v2", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(quoteBody)
+                });
+                if(!quoteReq.ok) throw new Error(`Odos Quote Failed: ${quoteReq.statusText}`);
+                const quoteData = await quoteReq.json();
+                
+                const txReq = await fetch("https://api.odos.xyz/sor/assemble", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ userAddr: userAddress, pathId: quoteData.pathId, simulate: false })
+                });
+                if(!txReq.ok) throw new Error(`Odos Assemble Failed: ${txReq.statusText}`);
+                const txData = await txReq.json();
+                
+                transaction = txData.transaction;
+            }
+
+            // ==========================================
+            // === APPROVE & EXECUTE TRANSACTION ===
+            // ==========================================
             const tokenContract = new ethers.Contract(token.address, abi.erc20, autovoterConfig.signer);
             broadcast({ type: 'swap_status', message: `Approving ${token.symbol}...` });
+            
             const approveTx = await tokenContract.approve(transaction.to, inputAmount);
             await approveTx.wait();
 
-            
-            broadcast({ type: 'swap_status', message: `Sending Swap Tx for ${token.symbol}...` });
+            broadcast({ type: 'swap_status', message: `Sending ${aggregator} Tx for ${token.symbol}...` });
             const txResponse = await autovoterConfig.signer.sendTransaction({
                 to: transaction.to,
                 data: transaction.data,
                 value: transaction.value,
-                gasLimit: 500000 
+                gasLimit: 600000 
             });
             
             await txResponse.wait();
@@ -873,7 +917,7 @@ ws.on('error', (err) => console.error('WebSocket error:', err.message));
 };
 
 if (parsed.type === 'save_settings') {
-    const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchDelayMs } = parsed.data; 
+const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchDelayMs, swapAggregator, slippageLimitPercent } = parsed.data;
 
     try {
         const percent = parseFloat(votePercentage);
@@ -905,7 +949,8 @@ if (parsed.type === 'save_settings') {
         autovoterConfig.tokenId = ids.length > 0 ? ids[0] : null; 
         autovoterConfig.votePercentage = percent;
         autovoterConfig.scanMode = scanMode || 'scheduled';
-
+if (swapAggregator) autovoterConfig.swapAggregator = swapAggregator;
+        if (slippageLimitPercent) autovoterConfig.slippageLimitPercent = parseFloat(slippageLimitPercent);
         saveCurrentSettings(); 
         
         ws.send(JSON.stringify({ 
@@ -965,7 +1010,7 @@ if (parsed.type === 'save_settings') {
                             const balances = await scanWalletBalances(autovoterConfig.signer.address);
                             if(balances.length > 0) {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `Swapping ${balances.length} tokens...` }));
-                                const count = await executeOdosSwap(balances, targetToken);
+const count = await executeSwap(balances, targetToken);
                                 ws.send(JSON.stringify({ type: 'swap_status', message: `✅ Auto-Swap: ${count} tokens swapped.` }));
                             } else {
                                 ws.send(JSON.stringify({ type: 'swap_status', message: 'No tokens found to swap.' }));
@@ -1218,13 +1263,13 @@ if (totalRealizedUSD > 0) {
                  ws.send(JSON.stringify({ type: 'swap_status', message: `Found ${balances.length} tokens.` }));
             }
             
-            else if (parsed.type === 'execute_odos_swap') {
+            else if (parsed.type === 'execute_swap' || parsed.type === 'execute_odos_swap') {
                 const { inputTokens, outputToken } = parsed.data;
                 try {
                      if (!autovoterConfig.signer) throw new Error("Please configure wallet in settings first.");
-                     ws.send(JSON.stringify({ type: 'swap_status', message: 'Starting Swap Process...' }));
+                     ws.send(JSON.stringify({ type: 'swap_status', message: `Starting Swap Process (${autovoterConfig.swapAggregator})...` }));
                      
-                     const swapsDone = await executeOdosSwap(inputTokens, outputToken);
+                     const swapsDone = await executeSwap(inputTokens, outputToken);
                      
                      ws.send(JSON.stringify({ type: 'swap_status', message: `Swap Process Complete. Swapped ${swapsDone} tokens.` }));
                 } catch(e) {
