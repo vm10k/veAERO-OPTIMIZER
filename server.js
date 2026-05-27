@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =================================================================================
 const config = {
     port: 3000,
-   rpcUrls:[
+    rpcUrls:[
         "GET FREE TIER RPC FROM ALCHEMY",        
         "GET FREE TIER RPC FROM ANKR",      
 		"GET FREE TIER RPC FROM TENDERLY",      
@@ -118,6 +118,7 @@ let latestFetchedData = { pools: [], summary: {}, prices: {} };
 let isFetching = false;
 let lastEpochVoted = null;
 let transactionHistory = [];
+let isExecutingVote = false; 
 let epochHistory = {};
 let compoundIntervalTimer = null;
 
@@ -483,6 +484,7 @@ async function executeVote() {
 
     console.log(`EXECUTE VOTE: Process started for ${autovoterConfig.tokenIds.length} NFTs.`);
     lastEpochVoted = currentEpochStart;
+	    isExecutingVote = true;
 
     try {
         broadcast({ type: 'autovoter_status', message: 'Analyzing pools for optimal strategy...' });
@@ -545,9 +547,10 @@ async function executeVote() {
                 const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
 
                 console.log(`Voting ID ${tokenId} (Nonce: ${currentNonce})...`);
-                
+                                
                 const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution, {
-                    nonce: currentNonce
+                    nonce: currentNonce,
+                    gasLimit: 1200000 
                 });
                 
                 currentNonce++; 
@@ -576,7 +579,9 @@ async function executeVote() {
         console.error("VOTE EXECUTION FAILED:", error);
         lastEpochVoted = null; 
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
-        logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
+       logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
+    } finally {
+        isExecutingVote = false;
     }
 }
 
@@ -1979,6 +1984,12 @@ async function startContinuousScanner() {
     let prioritizedPoolAddresses = null; 
 
     while (true) {
+        // 1. If the Sniper is currently voting, sleep completely to protect the RPC
+        if (typeof isExecutingVote !== 'undefined' && isExecutingVote) {
+            await sleep(5000);
+            continue; 
+        }
+
         try {
             if (autovoterConfig.scanMode === 'scheduled') {
                 const now = Math.floor(Date.now() / 1000);
@@ -2014,17 +2025,25 @@ async function startContinuousScanner() {
                     const WAKE_UP_WINDOW = 1200; 
 
                     if (timeRemaining > WAKE_UP_WINDOW) {
-    const minsToWait = Math.floor((timeRemaining - WAKE_UP_WINDOW) / 60);
-    const hoursToWait = (minsToWait / 60).toFixed(1);
-        if (Date.now() % 60000 < 5000) { 
-        console.log(`[Scheduled Mode] 💤 Standing by. Wake up in ~${hoursToWait} hours.`);
-    }
-    
-    broadcast({ type: 'status', message: `Scheduled Mode: Sleeping (${hoursToWait}h until scan)...` });
-    
-    await sleep(7000); 
-    continue; 
+                        const minsToWait = Math.floor((timeRemaining - WAKE_UP_WINDOW) / 60);
+                        const hoursToWait = (minsToWait / 60).toFixed(1);
+                        if (Date.now() % 60000 < 5000) { 
+                            console.log(`[Scheduled Mode] 💤 Standing by. Wake up in ~${hoursToWait} hours.`);
+                        }
+                        
+                        broadcast({ type: 'status', message: `Scheduled Mode: Sleeping (${hoursToWait}h until scan)...` });
+                        
+                        await sleep(7000); 
+                        continue; 
                     } else {
+                        // 2. Prevent a scan from starting right BEFORE the Sniper fires (15 second buffer)
+                        const voteLeadTime = config.voteLeadTime || 60;
+                        if (timeRemaining > 0 && timeRemaining <= (voteLeadTime + 15)) {
+                            console.log(`🛑 Execution window approaching. Pausing scanner to clear RPC traffic...`);
+                            await sleep(5000);
+                            continue;
+                        }
+
                         console.log(`⏰ Scheduled Mode: WAKE UP! Inside the 15m window.`);
                     }
                 }
@@ -2070,13 +2089,13 @@ async function startContinuousScanner() {
             await sleep(10000); 
         }
 
-if (autovoterConfig.scanMode === 'immediate') {
-        const mins = config.fetchInterval / 60000;
-        console.log(`[Immediate Mode] Scan complete. Sleeping for ${mins} minutes...`);
-        await sleep(config.fetchInterval); 
-    } else {
-        await sleep(5000); 
-    }
+        if (autovoterConfig.scanMode === 'immediate') {
+            const mins = config.fetchInterval / 60000;
+            console.log(`[Immediate Mode] Scan complete. Sleeping for ${mins} minutes...`);
+            await sleep(config.fetchInterval); 
+        } else {
+            await sleep(5000); 
+        }
     }
 }
 // =================================================================================
