@@ -484,7 +484,7 @@ async function executeVote() {
 
     console.log(`EXECUTE VOTE: Process started for ${autovoterConfig.tokenIds.length} NFTs.`);
     lastEpochVoted = currentEpochStart;
-	    isExecutingVote = true;
+    isExecutingVote = true;
 
     try {
         broadcast({ type: 'autovoter_status', message: 'Analyzing pools for optimal strategy...' });
@@ -519,55 +519,70 @@ async function executeVote() {
         });
 
         console.log(`Targeting ${poolsToVoteFor.length} pools: ${poolNames.join(', ')}`);
-        broadcast({ type: 'autovoter_status', message: `Voting for: ${poolNames.join(', ')}` });
         
-        let successfulHashes =[];
+        let successfulHashes = [];
         const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
         const currentTimestamp = Math.floor(Date.now() / 1000);
 
-        let currentNonce = await autovoterConfig.signer.getNonce("latest");
+        let currentNonce = await autovoterConfig.signer.getNonce("pending");
         const tokenIds = autovoterConfig.tokenIds;
+        const voteTasks = [];
 
         for (let i = 0; i < tokenIds.length; i++) {
             const tokenId = tokenIds[i];
+            const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
+            
+            if (totalVotingPower === 0n) {
+                console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
+                continue; 
+            }
+
+            const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
+            let weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
+            if (weightPerPool === 0n) weightPerPool = 1n; 
+            
+            const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
+            const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
+
+            voteTasks.push({
+                tokenId,
+                poolVoteAddresses,
+                weightDistribution,
+                nonce: currentNonce++ 
+            });
+        }
+
+        if (voteTasks.length === 0) throw new Error("No NFTs with voting power available.");
+
+        broadcast({ type: 'autovoter_status', message: `Executing votes in PARALLEL for ${voteTasks.length} NFTs...` });
+        
+        const votePromises = voteTasks.map(async (task) => {
+            console.log(`Voting ID ${task.tokenId} with Nonce ${task.nonce}...`);
             try {
-                const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
-                
-                if (totalVotingPower === 0n) {
-                    console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
-                    continue; 
-                }
-
-                const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
-                let weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
-                if (weightPerPool === 0n) weightPerPool = 1n; 
-                
-                const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
-                const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
-
-                console.log(`Voting ID ${tokenId}...`);
-                broadcast({ type: 'autovoter_status', message: `Executing vote for ID ${tokenId} via Parallel Retry Engine...` });
-                
                 const tx = await executeWithParallelRetry(
                     voterContractWithSigner, 
                     "vote", 
-                    [tokenId, poolVoteAddresses, weightDistribution], 
-                    autovoterConfig.signer
+                    [task.tokenId, task.poolVoteAddresses, task.weightDistribution], 
+                    autovoterConfig.signer,
+                    4,          
+                    task.nonce  
                 );
-                
-                successfulHashes.push(tx.hash);
-                console.log(`✅ Confirmed on-chain: ${tx.hash}`);
-
+                console.log(`✅ Confirmed on-chain for ID ${task.tokenId}: ${tx.hash}`);
+                return tx.hash;
             } catch (err) {
-                console.error(`❌ Error preparing/sending vote for ID ${tokenId}: ${err.shortMessage || err.message}`);
+                console.error(`❌ Error for ID ${task.tokenId}: ${err.shortMessage || err.message}`);
+                return null;
             }
-        }
+        });
+
+        const results = await Promise.all(votePromises);
+        successfulHashes = results.filter(hash => hash !== null);
 
         if (successfulHashes.length === 0) {
-            throw new Error("All vote transactions failed or reverted.");
+            throw new Error("All parallel vote transactions failed or reverted.");
         }
 
-        broadcast({ type: 'autovoter_status', message: `SUCCESS! All votes processed.` });
+        broadcast({ type: 'autovoter_status', message: `SUCCESS! ${successfulHashes.length}/${voteTasks.length} votes processed.` });
         
         let finalHashLabel = successfulHashes.length === 1 ? successfulHashes[0] : 'Multiple-NFTs';
         logTransaction('Auto-Vote', finalHashLabel, poolNames, totalEstimatedValue, 'Confirmed');
@@ -576,7 +591,7 @@ async function executeVote() {
         console.error("VOTE EXECUTION FAILED:", error);
         lastEpochVoted = null; 
         broadcast({ type: 'autovoter_status', message: `CRITICAL ERROR: ${error.message}` });
-       logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
+        logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
     } finally {
         isExecutingVote = false;
     }
@@ -585,10 +600,12 @@ async function executeVote() {
 // --- PARALLEL RETRY & GAS PADDING ENGINE ---
 // =================================================================================
 
-async function executeWithParallelRetry(contract, method, args, signer, maxRetries = 4) {
+async function executeWithParallelRetry(contract, method, args, signer, maxRetries = 4, customNonce = null) {
+    let lastError;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const nonce = await signer.getNonce("latest");
+            const nonce = customNonce !== null ? customNonce : await signer.getNonce("pending");
 
             const txRequest = await contract[method].populateTransaction(...args);
             
@@ -599,7 +616,6 @@ async function executeWithParallelRetry(contract, method, args, signer, maxRetri
                 try {
                     estimatedGas = await contract[method].estimateGas(...args);
                 } catch (gasError) {
-                    console.warn(`[Attempt ${attempt}] Gas estimation failed, falling back to 2M limits.`);
                     estimatedGas = 2000000n; 
                 }
                 txRequest.gasLimit = (estimatedGas * 150n) / 100n; 
@@ -609,7 +625,9 @@ async function executeWithParallelRetry(contract, method, args, signer, maxRetri
             txRequest.chainId = (await signer.provider.getNetwork()).chainId;
 
             const feeData = await signer.provider.getFeeData();
-            const feeMultiplier = 100n + BigInt((attempt - 1) * 20); 
+            
+         
+            const feeMultiplier = 110n + BigInt((attempt - 1) * 30); 
             
             const baseFee = feeData.maxFeePerGas ? BigInt(feeData.maxFeePerGas) : 10000000n; 
             const priorityFee = feeData.maxPriorityFeePerGas ? BigInt(feeData.maxPriorityFeePerGas) : 100000n;
@@ -619,7 +637,7 @@ async function executeWithParallelRetry(contract, method, args, signer, maxRetri
 
             const signedTx = await signer.signTransaction(txRequest);
 
-            console.log(`[Attempt ${attempt}/4] Broadcasting in parallel to ${providers.length} RPCs (Gas Bumped: ${attempt > 1 ? '+'+((attempt-1)*20)+'%' : '0%'})...`);
+            console.log(`⚡ [Sniper Attempt ${attempt}/4] Nonce ${nonce} | Gas: +${feeMultiplier - 100n}% | Broadcasting...`);
 
             const broadcastPromises = providers.map(async (p) => {
                 try { return await p.broadcastTransaction(signedTx); } 
@@ -629,12 +647,10 @@ async function executeWithParallelRetry(contract, method, args, signer, maxRetri
             const responses = await Promise.all(broadcastPromises);
             const validTx = responses.find(res => res !== null);
 
-            if (!validTx) throw new Error("All RPCs rejected the broadcast.");
-
-            console.log(`✅ Tx propagated: ${validTx.hash}. Waiting max 10s for confirmation...`);
+            if (!validTx) throw new Error("All RPCs rejected the broadcast. Likely low gas or duplicate.");
 
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("ConfirmationTimeout")), 10000)
+                setTimeout(() => reject(new Error("ConfirmationTimeout")), 4000)
             );
 
             const receipt = await Promise.race([
@@ -649,17 +665,20 @@ async function executeWithParallelRetry(contract, method, args, signer, maxRetri
             }
 
         } catch (error) {
-            console.error(`❌ Attempt ${attempt} failed:`, error.shortMessage || error.message);
+            lastError = error;
             
-            if (attempt === maxRetries) {
-                throw new Error(`CRITICAL: Failed permanently after ${maxRetries} attempts within the time window.`);
-            }
-            
-            if (error.message !== "ConfirmationTimeout") {
-                await sleep(2000); 
+            if (attempt < maxRetries) {
+                if (error.message === "ConfirmationTimeout") {
+                    console.warn(`⏳ Nonce ${customNonce !== null ? customNonce : 'N/A'} too slow. Immediately bumping gas and overwriting...`);
+                } else {
+                    console.warn(`❌ Nonce ${customNonce !== null ? customNonce : 'N/A'} Error: ${error.shortMessage || error.message}. Retrying instantly...`);
+                }
+            } else {
+                console.error(`💥 CRITICAL: Nonce ${customNonce !== null ? customNonce : 'N/A'} failed permanently after ${maxRetries} attempts.`);
             }
         }
     }
+    throw lastError;
 }
 
 async function executeManualVote(votes) {
