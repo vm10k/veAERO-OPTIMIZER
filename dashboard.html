@@ -681,8 +681,15 @@
                     <button id="simulate-btn">Simulate Vote</button>
                     <button id="save-settings-btn">Confirm & Save Settings</button>
                     <button id="toggle-autovoter-btn">Enable Auto-Voter</button> 
+					
                 </div>
-                
+<div style="display: none; margin-top: 15px; border: 2px dashed #ff4d4d; padding: 15px; background: rgba(255, 77, 77, 0.1);">
+    <label style="color: #ff4d4d; font-weight: bold; margin-bottom: 5px; display:block;">Parallel Stress Test</label>
+    <div style="display: flex; gap: 10px; align-items: stretch;">
+        <input type="text" id="parallel-test-address" value="0x46D710c35BdfB800a18A820712310048Ef8B5256" style="flex-grow: 1; font-family: monospace; background: #2d4341; border: 2px solid black; color: white; padding: 10px;">
+        <button id="run-parallel-test-btn" style="background-color: #ff4d4d; color: white; font-family: 'Retro'; border: 2px solid black; cursor: pointer; padding: 0 20px;">VOTE ALL 8 NFTs</button>
+    </div>
+</div>
                 <div class="strategy-group">
                     <div class="form-group">
                         <label>Auto-Voter Strategy</label>
@@ -1474,6 +1481,19 @@ modeBtns.forEach(btn => {
         btn.classList.add('active');
         btn.classList.remove('inactive');
     });
+});
+document.getElementById('run-parallel-test-btn').addEventListener('click', () => {
+    const testPool = document.getElementById('parallel-test-address').value.trim();
+    if (!testPool) return alert("Please provide a target pool address.");
+    
+    if (confirm(`WARNING: This will immediately cast a 100% vote for ALL configured veNFTs in parallel to:\n\n${testPool}\n\nAre you sure you want to run this test?`)) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.socket.send(JSON.stringify({ type: 'trigger_parallel_test', data: { poolAddress: testPool } }));
+            alert("Parallel test initiated! Watch the server console for the split-second nonce distribution.");
+        } else {
+            alert('WebSocket is not connected.');
+        }
+    }
 });
 const aggBtns = document.querySelectorAll('#swap-aggregator-selector button');
                     aggBtns.forEach(btn => {
