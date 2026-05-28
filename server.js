@@ -1209,7 +1209,7 @@ const count = await executeSwap(balances, targetToken);
                     ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: `Action Failed: ${e.message}` }));
                 }
             }
-          else if (parsed.type === 'claim_bribes') {
+         else if (parsed.type === 'claim_bribes') {
                 if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
                     return ws.send(JSON.stringify({ type: 'rewards_tx_result', success: false, message: 'Configure Bot first.' }));
                 }
@@ -1232,6 +1232,7 @@ const count = await executeSwap(balances, targetToken);
                     const feeAddresses = [];
                     const feeTokens = [];
                     let totalRealizedUSD = 0;
+                    const nftEarnings = {}; 
 
                     const votedPools = [];
                     for (const pool of latestFetchedData.pools) {
@@ -1263,7 +1264,11 @@ const count = await executeSwap(balances, targetToken);
                                             
                                             const price = latestFetchedData.prices[tAddr.toLowerCase()] || 0;
                                             const decimals = pool.fees[tAddr.toLowerCase()]?.decimals || 18;
-                                            totalRealizedUSD += (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                            const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                            
+                                            totalRealizedUSD += usdValue;
+                                            if (!nftEarnings[tid]) nftEarnings[tid] = 0;
+                                            nftEarnings[tid] += usdValue;
                                         }
                                     } catch (e) {}
                                 }
@@ -1288,7 +1293,11 @@ const count = await executeSwap(balances, targetToken);
 
                                             const price = latestFetchedData.prices[tAddr.toLowerCase()] || 0;
                                             const decimals = pool.bribes[tAddr.toLowerCase()]?.decimals || 18;
-                                            totalRealizedUSD += (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                            const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
+                                            
+                                            totalRealizedUSD += usdValue;
+                                            if (!nftEarnings[tid]) nftEarnings[tid] = 0;
+                                            nftEarnings[tid] += usdValue;
                                         }
                                     } catch (e) {}
                                 }
@@ -1322,7 +1331,47 @@ const count = await executeSwap(balances, targetToken);
                             resultMsg += `ID ${id} Fees `;
                         }
                     }
-if (totalRealizedUSD > 0) {
+                    
+                    const currentTimestamp = Math.floor(Date.now() / 1000);
+                    const epochDuration = 604800;
+                    const historicalTime = currentTimestamp - (epochDuration / 2);
+                    const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
+                    const aeroPrice = latestFetchedData.prices[AERO_ADDRESS] || 0;
+                    
+                    let aprResultMsg = "";
+                    
+                    console.log(`\n==================================================`);
+                    console.log(`📈 PER-NFT ACTUAL APR REPORT (BRIBES & FEES)`);
+                    console.log(`==================================================`);
+                    
+                    for (const id of autovoterConfig.tokenIds) {
+                        const earnedUsd = nftEarnings[id] || 0;
+                        if (earnedUsd <= 0) continue;
+                        
+                        let nftPower = 0n;
+                        try { nftPower = await veNftContract.balanceOfNFTAt(id, historicalTime); } catch(e) {}
+                        if (nftPower === 0n) {
+                            try { nftPower = await veNftContract.balanceOfNFTAt(id, currentTimestamp); } catch(e) {}
+                        }
+                        
+                        const powerFmt = parseFloat(ethers.formatEther(nftPower));
+                        const powerUsd = powerFmt * aeroPrice;
+                        let actualApr = 0;
+                        if (powerUsd > 0) {
+                            actualApr = (earnedUsd / powerUsd) * 52 * 100;
+                        }
+                        
+                        console.log(`NFT #${id}:`);
+                        console.log(`  - Earned: $${earnedUsd.toFixed(2)}`);
+                        console.log(`  - Power:  ${powerFmt.toFixed(2)} veAERO ($${powerUsd.toFixed(2)})`);
+                        console.log(`  - Actual APR: ${actualApr.toFixed(2)}%`);
+                        console.log(`--------------------------------------------------`);
+                        
+                        aprResultMsg += `[#${id}: ${actualApr.toFixed(2)}%] `;
+                    }
+                    console.log(`\n`);
+
+                    if (totalRealizedUSD > 0) {
                         await recordRealizedEarnings(totalRealizedUSD);
 
                         const lastVoteTx = transactionHistory.find(tx => tx.type === 'Auto-Vote');
@@ -1339,12 +1388,11 @@ if (totalRealizedUSD > 0) {
                             broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings } });
                         }
                     }
-					
 
                     ws.send(JSON.stringify({ 
                         type: 'rewards_tx_result', 
                         success: true, 
-                        message: `Successfully claimed $${totalRealizedUSD.toFixed(2)} (${resultMsg})` 
+                        message: `Successfully claimed $${totalRealizedUSD.toFixed(2)} ${aprResultMsg}` 
                     }));
 
                 } catch (e) {
@@ -1356,7 +1404,6 @@ if (totalRealizedUSD > 0) {
                     }));
                 }
             }
-           
             else if (parsed.type === 'scan_wallet_balances') {
                 
                  const targetAddr = autovoterConfig.signer ? autovoterConfig.signer.address : "0x22f9790175ef4f549092C91123E0f7C339CC7D3D";
@@ -1426,6 +1473,14 @@ broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
                 const { poolAddress } = parsed.data;
                 try {
                     await executeTestVote(poolAddress);
+                    ws.send(JSON.stringify({ type: 'test_vote_response', success: true }));
+                } catch (e) {
+                    ws.send(JSON.stringify({ type: 'test_vote_response', success: false, message: e.message }));
+                }
+				} else if (parsed.type === 'trigger_parallel_test') {
+                const { poolAddress } = parsed.data;
+                try {
+                    await executeParallelTestVote(poolAddress);
                     ws.send(JSON.stringify({ type: 'test_vote_response', success: true }));
                 } catch (e) {
                     ws.send(JSON.stringify({ type: 'test_vote_response', success: false, message: e.message }));
@@ -1868,7 +1923,75 @@ async function performRebase(signer, tokenIds) {
 
     return lastTx; 
 }
+async function executeParallelTestVote(poolAddress) {
+    if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
+        throw new Error("Bot not configured. Please save settings with Private Key and Token IDs.");
+    }
 
+    console.log(`🧪 PARALLEL TEST VOTE: Initiating test for ${autovoterConfig.tokenIds.length} NFTs to pool ${poolAddress}`);
+    broadcast({ type: 'autovoter_status', message: `Initiating Parallel Test Vote to ${poolAddress}...` });
+
+    let successfulHashes = [];
+    const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+
+    let currentNonce = await autovoterConfig.signer.getNonce("pending");
+    const tokenIds = autovoterConfig.tokenIds;
+    const voteTasks = [];
+
+    for (let i = 0; i < tokenIds.length; i++) {
+        const tokenId = tokenIds[i];
+        const totalVotingPower = await veNftContract.balanceOfNFTAt(tokenId, currentTimestamp);
+
+        if (totalVotingPower === 0n) {
+            console.log(`Skipping Token ID ${tokenId}: 0 Voting Power.`);
+            continue; 
+        }
+
+        const weights = [totalVotingPower];
+        const poolVoteAddresses = [poolAddress];
+
+        voteTasks.push({
+            tokenId,
+            poolVoteAddresses,
+            weightDistribution: weights,
+            nonce: currentNonce++ 
+        });
+    }
+
+    if (voteTasks.length === 0) throw new Error("No NFTs with voting power available.");
+
+    broadcast({ type: 'autovoter_status', message: `Executing test votes in PARALLEL for ${voteTasks.length} NFTs...` });
+
+    const votePromises = voteTasks.map(async (task) => {
+        console.log(`Test Voting ID ${task.tokenId} with Nonce ${task.nonce}...`);
+        try {
+            const tx = await executeWithParallelRetry(
+                voterContractWithSigner, 
+                "vote", 
+                [task.tokenId, task.poolVoteAddresses, task.weightDistribution], 
+                autovoterConfig.signer,
+                4,          
+                task.nonce  
+            );
+            console.log(`✅ Test Confirmed on-chain for ID ${task.tokenId}: ${tx.hash}`);
+            return tx.hash;
+        } catch (err) {
+            console.error(`❌ Test Error for ID ${task.tokenId}: ${err.shortMessage || err.message}`);
+            return null;
+        }
+    });
+
+    const results = await Promise.all(votePromises);
+    successfulHashes = results.filter(hash => hash !== null);
+
+    if (successfulHashes.length === 0) {
+        throw new Error("All parallel test vote transactions failed or reverted.");
+    }
+
+    broadcast({ type: 'autovoter_status', message: `TEST SUCCESS! ${successfulHashes.length}/${voteTasks.length} test votes processed.` });
+    logTransaction('Parallel-Test', successfulHashes.length === 1 ? successfulHashes[0] : 'Multiple-NFTs', ['TEST POOL'], 0, 'Confirmed');
+}
 // =================================================================================
 // --- AUTO-PILOT REWARDS CLAIMING ---
 // =================================================================================
@@ -1888,7 +2011,7 @@ async function performClaimBribes(signer, tokenIds, pools) {
 
     const ids = Array.isArray(tokenIds) ? tokenIds : [tokenIds];
     const votedPools = [];
-for (const pool of pools) {
+    for (const pool of pools) {
         let hasVote = false;
         for (const id of ids) {
             try {
@@ -1915,9 +2038,9 @@ for (const pool of pools) {
             const bribeTokens = [];
             const feeAddresses = [];
             const feeTokens =[];            
+            let nftEarningsUsd = 0; 
 
             for (const pool of pools) {
-                
                 if (pool.feeAddress && pool.feeAddress !== ethers.ZeroAddress) {
                     const contract = new ethers.Contract(pool.feeAddress, abi.rewardContract, getNextProvider());
                     const tokensFound =[];                   
@@ -1933,6 +2056,7 @@ for (const pool of pools) {
                                 const decimals = pool.fees[tokenAddr.toLowerCase()]?.decimals || 18;
                                 const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
                                 totalUsdRealizedAcrossAllNfts += usdValue;
+                                nftEarningsUsd += usdValue;
                                 
                                 console.log(`   ✨ Found Fee: ${pool.name} (${pool.fees[tokenAddr.toLowerCase()]?.symbol}) - Value: $${usdValue.toFixed(2)}`);
                             }
@@ -1943,7 +2067,6 @@ for (const pool of pools) {
                         feeTokens.push(tokensFound);
                     }
                 }
-
 
                 if (pool.bribeAddress && pool.bribeAddress !== ethers.ZeroAddress) {
                     const contract = new ethers.Contract(pool.bribeAddress, abi.rewardContract, getNextProvider());
@@ -1960,6 +2083,7 @@ for (const pool of pools) {
                                 const decimals = pool.bribes[tokenAddr.toLowerCase()]?.decimals || 18;
                                 const usdValue = (parseFloat(ethers.formatUnits(earned, decimals)) * price);
                                 totalUsdRealizedAcrossAllNfts += usdValue;
+                                nftEarningsUsd += usdValue;
 
                                 console.log(`   ✨ Found Bribe: ${pool.name} (${pool.bribes[tokenAddr.toLowerCase()]?.symbol}) - Value: $${usdValue.toFixed(2)}`);
                             }
@@ -1988,6 +2112,34 @@ for (const pool of pools) {
                 lastTx = tx;
                 await tx.wait();
                 console.log(`✅ Fee Claim Confirmed: ${tx.hash}`);
+            }
+
+            if (nftEarningsUsd > 0) {
+                const currentTimestamp = Math.floor(Date.now() / 1000);
+                const epochDuration = 604800;
+                const historicalTime = currentTimestamp - (epochDuration / 2);
+                const AERO_ADDRESS = '0x940181a94A35A4569E4529A3CDfB74e38FD98631'.toLowerCase();
+                const aeroPrice = latestFetchedData.prices[AERO_ADDRESS] || 0;
+                
+                let nftPower = 0n;
+                try { nftPower = await veNftContract.balanceOfNFTAt(id, historicalTime); } catch(e) {}
+                if (nftPower === 0n) {
+                    try { nftPower = await veNftContract.balanceOfNFTAt(id, currentTimestamp); } catch(e) {}
+                }
+                
+                const powerFmt = parseFloat(ethers.formatEther(nftPower));
+                const powerUsd = powerFmt * aeroPrice;
+                let actualApr = 0;
+                if (powerUsd > 0) {
+                    actualApr = (nftEarningsUsd / powerUsd) * 52 * 100;
+                }
+                
+                console.log(`\n📊 NFT #${id} Performance:`);
+                console.log(`  - Earned: $${nftEarningsUsd.toFixed(2)}`);
+                console.log(`  - Power:  ${powerFmt.toFixed(2)} veAERO ($${powerUsd.toFixed(2)})`);
+                console.log(`  - Actual APR: ${actualApr.toFixed(2)}%\n`);
+                
+                broadcast({ type: 'swap_status', message: `NFT #${id} APR: ${actualApr.toFixed(2)}% ($${nftEarningsUsd.toFixed(2)})` });
             }
 
         } catch (e) {
