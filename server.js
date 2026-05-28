@@ -540,26 +540,23 @@ async function executeVote() {
 
                 const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
                 let weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
-                
                 if (weightPerPool === 0n) weightPerPool = 1n; 
                 
                 const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
                 const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
 
-                console.log(`Voting ID ${tokenId} (Nonce: ${currentNonce})...`);
-                                
-                const tx = await voterContractWithSigner.vote(tokenId, poolVoteAddresses, weightDistribution, {
-                    nonce: currentNonce,
-                    gasLimit: 1200000 
-                });
+                console.log(`Voting ID ${tokenId}...`);
+                broadcast({ type: 'autovoter_status', message: `Executing vote for ID ${tokenId} via Parallel Retry Engine...` });
                 
-                currentNonce++; 
+                const tx = await executeWithParallelRetry(
+                    voterContractWithSigner, 
+                    "vote", 
+                    [tokenId, poolVoteAddresses, weightDistribution], 
+                    autovoterConfig.signer
+                );
                 
-                broadcast({ type: 'autovoter_status', message: `Vote Tx sent for ID ${tokenId}. Waiting for confirmation...` });
-                
-                await tx.wait(); 
                 successfulHashes.push(tx.hash);
-                console.log(`✅ Confirmed: ${tx.hash}`);
+                console.log(`✅ Confirmed on-chain: ${tx.hash}`);
 
             } catch (err) {
                 console.error(`❌ Error preparing/sending vote for ID ${tokenId}: ${err.shortMessage || err.message}`);
@@ -582,6 +579,86 @@ async function executeVote() {
        logTransaction('Auto-Vote', 'Failed', [], 0, 'Failed: ' + error.message);
     } finally {
         isExecutingVote = false;
+    }
+}
+// =================================================================================
+// --- PARALLEL RETRY & GAS PADDING ENGINE ---
+// =================================================================================
+
+async function executeWithParallelRetry(contract, method, args, signer, maxRetries = 4) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const nonce = await signer.getNonce("latest");
+
+            const txRequest = await contract[method].populateTransaction(...args);
+            
+            if (method === "vote") {
+                txRequest.gasLimit = 2000000n; 
+            } else {
+                let estimatedGas;
+                try {
+                    estimatedGas = await contract[method].estimateGas(...args);
+                } catch (gasError) {
+                    console.warn(`[Attempt ${attempt}] Gas estimation failed, falling back to 2M limits.`);
+                    estimatedGas = 2000000n; 
+                }
+                txRequest.gasLimit = (estimatedGas * 150n) / 100n; 
+            }
+
+            txRequest.nonce = nonce;
+            txRequest.chainId = (await signer.provider.getNetwork()).chainId;
+
+            const feeData = await signer.provider.getFeeData();
+            const feeMultiplier = 100n + BigInt((attempt - 1) * 20); 
+            
+            const baseFee = feeData.maxFeePerGas ? BigInt(feeData.maxFeePerGas) : 10000000n; 
+            const priorityFee = feeData.maxPriorityFeePerGas ? BigInt(feeData.maxPriorityFeePerGas) : 100000n;
+
+            txRequest.maxFeePerGas = (baseFee * feeMultiplier) / 100n;
+            txRequest.maxPriorityFeePerGas = (priorityFee * feeMultiplier) / 100n;
+
+            const signedTx = await signer.signTransaction(txRequest);
+
+            console.log(`[Attempt ${attempt}/4] Broadcasting in parallel to ${providers.length} RPCs (Gas Bumped: ${attempt > 1 ? '+'+((attempt-1)*20)+'%' : '0%'})...`);
+
+            const broadcastPromises = providers.map(async (p) => {
+                try { return await p.broadcastTransaction(signedTx); } 
+                catch (e) { return null; }
+            });
+
+            const responses = await Promise.all(broadcastPromises);
+            const validTx = responses.find(res => res !== null);
+
+            if (!validTx) throw new Error("All RPCs rejected the broadcast.");
+
+            console.log(`✅ Tx propagated: ${validTx.hash}. Waiting max 10s for confirmation...`);
+
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("ConfirmationTimeout")), 10000)
+            );
+
+            const receipt = await Promise.race([
+                validTx.wait(1),
+                timeoutPromise
+            ]);
+            
+            if (receipt && receipt.status === 1) {
+                return validTx; 
+            } else {
+                throw new Error("Transaction reverted on-chain.");
+            }
+
+        } catch (error) {
+            console.error(`❌ Attempt ${attempt} failed:`, error.shortMessage || error.message);
+            
+            if (attempt === maxRetries) {
+                throw new Error(`CRITICAL: Failed permanently after ${maxRetries} attempts within the time window.`);
+            }
+            
+            if (error.message !== "ConfirmationTimeout") {
+                await sleep(2000); 
+            }
+        }
     }
 }
 
@@ -621,20 +698,19 @@ async function executeManualVote(votes) {
     const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
 
     console.log(`Sending Manual Vote Transaction for ${poolNames.join(', ')}...`);
-    const tx = await voterContractWithSigner.vote(autovoterConfig.tokenId, poolAddresses, weights);
+    
+    const tx = await executeWithParallelRetry(
+        voterContractWithSigner, 
+        "vote", 
+        [autovoterConfig.tokenId, poolAddresses, weights], 
+        autovoterConfig.signer
+    );
 
-    console.log(`Manual Vote Tx Sent: ${tx.hash}`);
+    console.log(`Manual Vote Confirmed: ${tx.hash}`);
 
-    logTransaction('Manual-Vote', tx.hash, poolNames, 0, 'Pending');
-
-    await tx.wait();
-    console.log(`Manual Vote Confirmed.`);
-
-    if (transactionHistory.length > 0 && transactionHistory[0].hash === tx.hash) {
-        transactionHistory[0].status = 'Confirmed';
+    logTransaction('Manual-Vote', tx.hash, poolNames, 0, 'Confirmed');
         fs.writeFileSync(transactionsFilePath, JSON.stringify(transactionHistory, null, 2), 'utf8');
         broadcast({ type: 'transaction_update', data: { history: transactionHistory, totalEarnings: 0 } });
-    }
     await trackEpochPerformance(latestFetchedData.summary, latestFetchedData.pools);
 
     return tx.hash;
@@ -891,20 +967,24 @@ loadEpochHistory();
 
 wss.on('connection', ws => {
     console.log('Client connected.');
+    const originalSend = ws.send.bind(ws);
+    ws.send = (data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            originalSend(data);
+        }
+    };
 
-    
     const uiConfig = {
         ...autovoterConfig,
         hasWallet: !!autovoterConfig.signer, 
         privateKey: "" 
     };
 
-ws.send(JSON.stringify({ type: 'autovoter_config_status', data: getSafeConfig() }));
+    ws.send(JSON.stringify({ type: 'autovoter_config_status', data: getSafeConfig() }));
     ws.send(JSON.stringify({ type: 'epoch_history_update', data: epochHistory }));
 
     ws.on('close', () => console.log('Client disconnected.'));
-ws.on('error', (err) => console.error('WebSocket error:', err.message));
-
+    ws.on('error', (err) => console.error('WebSocket error:', err.message));
     ws.on('message', async (message) => {
         try {
             const parsed = JSON.parse(message);
@@ -1984,7 +2064,6 @@ async function startContinuousScanner() {
     let prioritizedPoolAddresses = null; 
 
     while (true) {
-        // 1. If the Sniper is currently voting, sleep completely to protect the RPC
         if (typeof isExecutingVote !== 'undefined' && isExecutingVote) {
             await sleep(5000);
             continue; 
@@ -2036,7 +2115,6 @@ async function startContinuousScanner() {
                         await sleep(7000); 
                         continue; 
                     } else {
-                        // 2. Prevent a scan from starting right BEFORE the Sniper fires (15 second buffer)
                         const voteLeadTime = config.voteLeadTime || 60;
                         if (timeRemaining > 0 && timeRemaining <= (voteLeadTime + 15)) {
                             console.log(`🛑 Execution window approaching. Pausing scanner to clear RPC traffic...`);
