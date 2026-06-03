@@ -1134,17 +1134,16 @@ const count = await executeSwap(balances, targetToken);
                         const now = Math.floor(Date.now() / 1000);
                         
                         
-                        const currentEpochStart = latestFetchedData.summary.epochVoteEnd - 604800;
-                        const executionTime = currentEpochStart + (parseFloat(delayHours) * 3600);
+const epochEndTime = latestFetchedData.summary.epochVoteEnd;
+const executionTime = epochEndTime + (parseFloat(delayHours) * 3600);
 
-                        if (now >= executionTime) {
-                            
-                            if (!autovoterConfig.lastAutoPilotEpochEnd || autovoterConfig.lastAutoPilotEpochEnd < currentEpochStart) {
-                                autovoterConfig.lastAutoPilotEpochEnd = currentEpochStart;
-                                saveCurrentSettings(); 
-                                await runAutoSequence();
-                            }
-                        }
+if (now >= executionTime) {
+    if (!autovoterConfig.lastAutoPilotEpochEnd || autovoterConfig.lastAutoPilotEpochEnd < epochEndTime) {
+        autovoterConfig.lastAutoPilotEpochEnd = epochEndTime;
+        saveCurrentSettings(); 
+        await runAutoSequence();
+    }
+}
                     };
 
                     checkAndRunAutoPilot();
