@@ -489,8 +489,8 @@ async function executeVote() {
     try {
         broadcast({ type: 'autovoter_status', message: 'Analyzing pools for optimal strategy...' });
 
-        const simulationId = autovoterConfig.tokenIds[0];
-        const projection = await getProjectedVoteOutcome(simulationId, autovoterConfig.votePercentage);
+        const simulationIdsString = autovoterConfig.tokenIds.join(',');
+        const projection = await getProjectedVoteOutcome(simulationIdsString, autovoterConfig.votePercentage);
         if (!projection || projection.length === 0) throw new Error("No pool data available to execute vote.");
 
         let poolsToVoteFor =[];
@@ -498,9 +498,15 @@ async function executeVote() {
 
         if (autovoterConfig.voteStrategy === 'optimized') {
             const currentTimestamp = Math.floor(Date.now() / 1000);
-            const simPower = await veNftContract.balanceOfNFTAt(simulationId, currentTimestamp);
-            poolsToVoteFor = await findOptimalDiversification(projection, simPower);
-        } 
+            
+            let totalSimPower = 0n;
+            for (const id of autovoterConfig.tokenIds) {
+                totalSimPower += await veNftContract.balanceOfNFTAt(id, currentTimestamp);
+            }
+            
+            poolsToVoteFor = await findOptimalDiversification(projection, totalSimPower);
+        }
+		
         else if (autovoterConfig.voteStrategy === 'diversified') {
             const numPools = Math.min(autovoterConfig.diversificationPools, projection.length);
             poolsToVoteFor = projection.slice(0, numPools);
