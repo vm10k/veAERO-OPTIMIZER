@@ -1136,20 +1136,20 @@ const count = await executeSwap(balances, targetToken);
                     
                     
                     const checkAndRunAutoPilot = async () => {
-                        if (!latestFetchedData.summary.epochVoteEnd) return;
                         const now = Math.floor(Date.now() / 1000);
+                        const epochDuration = 604800; 
                         
+                        const lastEpochFlipTime = Math.floor(now / epochDuration) * epochDuration;
                         
-const epochEndTime = latestFetchedData.summary.epochVoteEnd;
-const executionTime = epochEndTime + (parseFloat(delayHours) * 3600);
+                        const executionTime = lastEpochFlipTime + (parseFloat(delayHours) * 3600);
 
-if (now >= executionTime) {
-    if (!autovoterConfig.lastAutoPilotEpochEnd || autovoterConfig.lastAutoPilotEpochEnd < epochEndTime) {
-        autovoterConfig.lastAutoPilotEpochEnd = epochEndTime;
-        saveCurrentSettings(); 
-        await runAutoSequence();
-    }
-}
+                        if (now >= executionTime) {
+                            if (!autovoterConfig.lastAutoPilotEpochEnd || autovoterConfig.lastAutoPilotEpochEnd < lastEpochFlipTime) {
+                                autovoterConfig.lastAutoPilotEpochEnd = lastEpochFlipTime;
+                                saveCurrentSettings(); 
+                                await runAutoSequence();
+                            }
+                        }
                     };
 
                     checkAndRunAutoPilot();
