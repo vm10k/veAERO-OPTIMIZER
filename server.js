@@ -463,7 +463,60 @@ async function findOptimalDiversification(sortedPools, userVoteWeight) {
     console.log(`Optimal strategy found: Diversify across ${bestSetup.poolCount} pools.`);
     return bestSetup.pools;
 }
+async function findFractionalDiversification(sortedPools, userVoteWeight) {
+    const validPools = sortedPools.filter(p => (p.totalFeesUSD + p.totalBribesUSD) > 0);
+    if (validPools.length === 0) return [];
 
+    const NUM_CHUNKS = 100; 
+    const chunkWeightEther = Number(ethers.formatEther(userVoteWeight)) / NUM_CHUNKS;
+    
+    const allocations = {};
+    validPools.forEach(p => allocations[p.address] = 0);
+
+    for (let i = 0; i < NUM_CHUNKS; i++) {
+        let bestPool = null;
+        let maxMarginalGain = -1;
+
+        for (const pool of validPools) {
+            const totalRewards = pool.totalFeesUSD + pool.totalBribesUSD;
+            const poolBasePower = Number(ethers.formatEther(pool.votingPower));
+            
+            const currentChunks = allocations[pool.address];
+            const currentWeight = currentChunks * chunkWeightEther;
+            const nextWeight = (currentChunks + 1) * chunkWeightEther;
+
+            const currentShare = currentWeight / (poolBasePower + currentWeight);
+            const nextShare = nextWeight / (poolBasePower + nextWeight);
+
+            const currentEarnings = totalRewards * currentShare;
+            const nextEarnings = totalRewards * nextShare;
+            
+            const marginalGain = nextEarnings - currentEarnings;
+
+            if (marginalGain > maxMarginalGain) {
+                maxMarginalGain = marginalGain;
+                bestPool = pool;
+            }
+        }
+        
+        if (bestPool) {
+            allocations[bestPool.address]++;
+        }
+    }
+
+    const finalSelection = [];
+    for (const pool of validPools) {
+        if (allocations[pool.address] > 0) {
+            finalSelection.push({
+                ...pool,
+                allocationPercentage: allocations[pool.address]
+            });
+        }
+    }
+
+    console.log(`Fractional Strategy: Distributed across ${finalSelection.length} pools.`);
+    return finalSelection.sort((a, b) => b.allocationPercentage - a.allocationPercentage);
+}
 async function executeVote() {
     if (!autovoterConfig.signer || !autovoterConfig.tokenIds || autovoterConfig.tokenIds.length === 0) {
         broadcast({ type: 'autovoter_status', message: 'Bot not configured. Please save settings with at least one Token ID.' });
@@ -493,20 +546,21 @@ async function executeVote() {
         const projection = await getProjectedVoteOutcome(simulationIdsString, autovoterConfig.votePercentage);
         if (!projection || projection.length === 0) throw new Error("No pool data available to execute vote.");
 
-        let poolsToVoteFor =[];
+      let poolsToVoteFor = [];
         let estimatedTotalRewardValue = 0; 
+        
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        let totalSimPower = 0n;
+        for (const id of autovoterConfig.tokenIds) {
+            totalSimPower += await veNftContract.balanceOfNFTAt(id, currentTimestamp);
+        }
 
-        if (autovoterConfig.voteStrategy === 'optimized') {
-            const currentTimestamp = Math.floor(Date.now() / 1000);
-            
-            let totalSimPower = 0n;
-            for (const id of autovoterConfig.tokenIds) {
-                totalSimPower += await veNftContract.balanceOfNFTAt(id, currentTimestamp);
-            }
-            
+        if (autovoterConfig.voteStrategy === 'fractional') {
+            poolsToVoteFor = await findFractionalDiversification(projection, totalSimPower);
+        }
+        else if (autovoterConfig.voteStrategy === 'optimized') {
             poolsToVoteFor = await findOptimalDiversification(projection, totalSimPower);
         }
-		
         else if (autovoterConfig.voteStrategy === 'diversified') {
             const numPools = Math.min(autovoterConfig.diversificationPools, projection.length);
             poolsToVoteFor = projection.slice(0, numPools);
@@ -517,22 +571,32 @@ async function executeVote() {
 
         if (poolsToVoteFor.length === 0) throw new Error("Strategy resulted in no pools.");
 
-        const poolNames = poolsToVoteFor.map(p => p.name);
-        const percentageAsInteger = BigInt(Math.round(autovoterConfig.votePercentage * 100));
+        let poolNames = [];
         let totalEstimatedValue = 0;
+
         poolsToVoteFor.forEach(p => {
-             if (p.projectedUserWeeklyRewards) totalEstimatedValue += p.projectedUserWeeklyRewards;
+            if (p.allocationPercentage) {
+                poolNames.push(`${p.name} (${p.allocationPercentage}%)`);
+                const totalRewards = p.totalFeesUSD + p.totalBribesUSD;
+                const poolBasePower = Number(ethers.formatEther(p.votingPower));
+                const allocatedPower = (Number(ethers.formatEther(totalSimPower)) * p.allocationPercentage) / 100;
+                const share = (poolBasePower + allocatedPower) > 0 ? allocatedPower / (poolBasePower + allocatedPower) : 0;
+                totalEstimatedValue += (totalRewards * share);
+            } else {
+                poolNames.push(p.name);
+                if (p.projectedUserWeeklyRewards) totalEstimatedValue += p.projectedUserWeeklyRewards;
+            }
         });
 
         console.log(`Targeting ${poolsToVoteFor.length} pools: ${poolNames.join(', ')}`);
         
         let successfulHashes = [];
         const voterContractWithSigner = voterContract.connect(autovoterConfig.signer);
-        const currentTimestamp = Math.floor(Date.now() / 1000);
 
         let currentNonce = await autovoterConfig.signer.getNonce("pending");
         const tokenIds = autovoterConfig.tokenIds;
         const voteTasks = [];
+        const percentageAsInteger = BigInt(Math.round(autovoterConfig.votePercentage * 100));
 
         for (let i = 0; i < tokenIds.length; i++) {
             const tokenId = tokenIds[i];
@@ -544,10 +608,17 @@ async function executeVote() {
             }
 
             const usedVotingPower = (totalVotingPower * percentageAsInteger) / 10000n;
-            let weightPerPool = usedVotingPower / BigInt(poolsToVoteFor.length);
-            if (weightPerPool === 0n) weightPerPool = 1n; 
             
-            const weightDistribution = poolsToVoteFor.map(() => weightPerPool);
+            const weightDistribution = poolsToVoteFor.map(p => {
+                if (p.allocationPercentage) {
+                    let w = (usedVotingPower * BigInt(Math.floor(p.allocationPercentage * 100))) / 10000n;
+                    return w === 0n ? 1n : w;
+                } else {
+                    let w = usedVotingPower / BigInt(poolsToVoteFor.length);
+                    return w === 0n ? 1n : w;
+                }
+            });
+            
             const poolVoteAddresses = poolsToVoteFor.map(p => p.address);
 
             voteTasks.push({
@@ -1465,7 +1536,7 @@ const count = await executeSwap(balances, targetToken);
 broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
             } else if (parsed.type === 'set_vote_strategy') {
                 const { strategy, pools } = parsed.data;
-                if (['single', 'diversified', 'optimized'].includes(strategy)) {
+                if (['single', 'diversified', 'optimized', 'fractional'].includes(strategy)) {
                     autovoterConfig.voteStrategy = strategy;
                 }
                 const numPools = parseInt(pools, 10);
@@ -1473,8 +1544,9 @@ broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
                     autovoterConfig.diversificationPools = numPools;
                 }
                 saveCurrentSettings();
-broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
-            } else if (parsed.type === 'trigger_test_vote') {
+                broadcast({ type: 'autovoter_config_status', data: getSafeConfig() });
+            }
+			else if (parsed.type === 'trigger_test_vote') {
                 const { poolAddress } = parsed.data;
                 try {
                     await executeTestVote(poolAddress);
