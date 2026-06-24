@@ -687,14 +687,15 @@
     <label style="color: #ff4d4d; font-weight: bold; margin-bottom: 5px; display:block;">Parallel Stress Test</label>
     <div style="display: flex; gap: 10px; align-items: stretch;">
         <input type="text" id="parallel-test-address" value="0x46D710c35BdfB800a18A820712310048Ef8B5256" style="flex-grow: 1; font-family: monospace; background: #2d4341; border: 2px solid black; color: white; padding: 10px;">
-        <button id="run-parallel-test-btn" style="background-color: #ff4d4d; color: white; font-family: 'Retro'; border: 2px solid black; cursor: pointer; padding: 0 20px;">VOTE ALL 8 NFTs</button>
+<button id="run-parallel-test-btn" style="background-color: #ff4d4d; color: white; font-family: 'Retro'; border: 2px solid black; cursor: pointer; padding: 0 20px;">VOTE ALL 12 NFTs</button>
     </div>
 </div>
-                <div class="strategy-group">
+               <div class="strategy-group">
                     <div class="form-group">
                         <label>Auto-Voter Strategy</label>
                         <div class="strategy-selector button-group">
-                            <button id="strategy-optimized-btn" data-strategy="optimized">Optimized (Automatic)</button>
+                            <button id="strategy-optimized-btn" data-strategy="optimized">Optimized (Equal Splits)</button>
+                            <button id="strategy-fractional-btn" data-strategy="fractional">Fractional (Whale Mode)</button>
                             <button id="strategy-diversified-btn" data-strategy="diversified">Diversify (Manual)</button>
                             <button id="strategy-single-btn" data-strategy="single">Best Single Pool</button>
                         </div>
