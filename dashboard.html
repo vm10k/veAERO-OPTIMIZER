@@ -647,7 +647,10 @@
     <label for="token-id">veNFT Token IDs (Comma separated for multiple)</label>
     <input type="text" id="token-id" placeholder="e.g., 91799, 92100, 10500">
 </div>
-                
+                <div class="form-group">
+    <label for="blacklisted-pools" style="color: #ff4d4d;">Blacklisted Pool Addresses (Comma separated to ignore completely)</label>
+    <textarea id="blacklisted-pools" rows="2" placeholder="0x123...,&#10;0x456..." style="font-family: monospace; background-color: #2d4341; border: 2px solid #ff4d4d; color: var(--text-color); padding: 10px; font-size: 0.9rem; outline: none; width: 100%; resize: vertical;"></textarea>
+</div>
 <div class="form-group">
     <label>Bot Scan Mode</label>
     <div class="strategy-selector button-group" id="scan-mode-selector">
@@ -1139,7 +1142,14 @@ if (config.rpcUrls || config.rpcUrl) {
     const urls = config.rpcUrls || config.rpcUrl;
     document.getElementById('rpc-urls').value = Array.isArray(urls) ? urls.join(',\n') : urls;
 }
-                     if (config.batchSize) document.getElementById('batch-size').value = config.batchSize;
+
+if (config.blacklistedPools) {
+    document.getElementById('blacklisted-pools').value = Array.isArray(config.blacklistedPools) 
+        ? config.blacklistedPools.join(',\n') 
+        : config.blacklistedPools;
+}
+
+if (config.batchSize) document.getElementById('batch-size').value = config.batchSize;
                      if (config.fetchDelayMs) document.getElementById('fetch-delay').value = (config.fetchDelayMs / 1000).toFixed(1);
 const agg = config.swapAggregator || 'kyber';
                     const kyberBtn = document.getElementById('agg-kyber-btn');
@@ -1739,41 +1749,56 @@ document.getElementById('swap-btn').addEventListener('click', () => {
     }
 });
                     saveBtn.addEventListener('click', () => {
-                        const privateKey = privateKeyInput.value.trim();
-                        const simInputs = validateSimInputs();
-                        if (!simInputs) return;
-                        
-                        let selectedMode = 'scheduled';
-                        if(document.getElementById('mode-immediate-btn').classList.contains('active')) {
-                            selectedMode = 'immediate';
-                        }
+    const privateKey = privateKeyInput.value.trim();
+    const simInputs = validateSimInputs();
+    if (!simInputs) return;
+    
+    let selectedMode = 'scheduled';
+    if(document.getElementById('mode-immediate-btn').classList.contains('active')) {
+        selectedMode = 'immediate';
+    }
 
-const rawRpcUrls = document.getElementById('rpc-urls').value.trim();
-const rpcUrl = rawRpcUrls.replace(/\n/g, '').replace(/\s+/g, '');
-                        const batchSize = parseInt(document.getElementById('batch-size').value, 10);
-                        const fetchDelayMs = parseFloat(document.getElementById('fetch-delay').value) * 1000;
-                        
-let swapAggregator = 'kyber';
+    const rawRpcUrls = document.getElementById('rpc-urls').value.trim();
+    const rpcUrl = rawRpcUrls.replace(/\n/g, '').replace(/\s+/g, '');
+    const batchSize = parseInt(document.getElementById('batch-size').value, 10);
+    const fetchDelayMs = parseFloat(document.getElementById('fetch-delay').value) * 1000;
+    
+    let swapAggregator = 'kyber';
 if(document.getElementById('agg-odos-btn').classList.contains('active')) {
     swapAggregator = 'odos';
 }
-                        const slippageLimitPercent = parseFloat(document.getElementById('slippage-limit').value);
+const slippageLimitPercent = parseFloat(document.getElementById('slippage-limit').value);
 
-                        if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
-                            return alert('Please provide a valid 64-character hex private key, prefixed with "0x", or leave it blank.'); 
-                        }
-                        
-                        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                            this.socket.send(JSON.stringify({ 
-                                type: 'save_settings', 
-                                data: { privateKey, ...simInputs, scanMode: selectedMode, rpcUrl, batchSize, fetchDelayMs, swapAggregator, slippageLimitPercent } 
-                            }));
-							
-                            settingsStatusEl.textContent = 'Status: Sending to server...';
-                            settingsStatusEl.style.color = 'var(--text-secondary-color)';
-                        }
-                        else alert('WebSocket is not connected. Please wait for a connection.');
-                    });
+const rawBlacklist = document.getElementById('blacklisted-pools').value.trim();
+const blacklistedPools = rawBlacklist 
+    ? rawBlacklist.split(',').map(addr => addr.trim().toLowerCase()).filter(addr => addr.startsWith('0x')) 
+    : [];
+
+if (privateKey && (!privateKey.startsWith('0x') || privateKey.length !== 66)) { 
+    return alert('Please provide a valid 64-character hex private key...'); 
+}
+
+if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    this.socket.send(JSON.stringify({ 
+        type: 'save_settings', 
+        data: { 
+            privateKey, 
+            ...simInputs, 
+            scanMode: selectedMode, 
+            rpcUrl, 
+            batchSize, 
+            fetchDelayMs, 
+            swapAggregator, 
+            slippageLimitPercent,
+            blacklistedPools 
+        } 
+    }));
+        
+        settingsStatusEl.textContent = 'Status: Sending to server...';
+        settingsStatusEl.style.color = 'var(--text-secondary-color)';
+    }
+    else alert('WebSocket is not connected. Please wait for a connection.');
+});
 
 
                     toggleAutovoterBtn.addEventListener('click', () => {
