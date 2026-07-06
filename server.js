@@ -137,7 +137,8 @@ let autovoterConfig = {
     batchSize: 7,
     fetchDelayMs: 1200,
 	swapAggregator: 'kyber',     
-    slippageLimitPercent: 3.0      
+    slippageLimitPercent: 3.0,       
+	    blacklistedPools: [] 
 };
 let isLoopRunning = false;
 
@@ -163,6 +164,7 @@ function loadSettings() {
             autovoterConfig.fetchDelayMs = savedSettings.fetchDelayMs || 1000;
 			autovoterConfig.swapAggregator = savedSettings.swapAggregator || 'kyber'; 
             autovoterConfig.slippageLimitPercent = savedSettings.slippageLimitPercent || 3.0; 
+			            autovoterConfig.blacklistedPools = (savedSettings.blacklistedPools || []).map(addr => addr.toLowerCase());
 
             console.log(`Loaded preferences for ${autovoterConfig.tokenIds.length} Token IDs.`);
         } else {
@@ -412,8 +414,10 @@ async function getProjectedVoteOutcome(tokenIdsInput, votePercentage) {
     const userVoteWeight = (totalUserVotingPower * percentageAsInteger) / 10000n;
     const userVoteWeightEther = Number(ethers.formatEther(userVoteWeight));
     const userVoteValueUSD = userVoteWeightEther * aeroPrice;
-
-    const simulatedPools = latestFetchedData.pools.map(pool => {
+const eligiblePools = latestFetchedData.pools.filter(pool => {
+        return !(autovoterConfig.blacklistedPools && autovoterConfig.blacklistedPools.includes(pool.address.toLowerCase()));
+    });
+    const simulatedPools = eligiblePools.map(pool => { 
         const totalRewardsUSD = pool.totalFeesUSD + pool.totalBribesUSD;
         const newTotalPoolPower = BigInt(pool.votingPower) + userVoteWeight;
         const newTotalPoolPowerEther = Number(ethers.formatEther(newTotalPoolPower));
@@ -1098,7 +1102,7 @@ wss.on('connection', ws => {
 };
 
 if (parsed.type === 'save_settings') {
-const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchDelayMs, swapAggregator, slippageLimitPercent } = parsed.data;
+const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchDelayMs, swapAggregator, slippageLimitPercent, blacklistedPools } = parsed.data;
 
     try {
         const percent = parseFloat(votePercentage);
@@ -1132,6 +1136,9 @@ const { privateKey, tokenId, votePercentage, scanMode, rpcUrl, batchSize, fetchD
         autovoterConfig.scanMode = scanMode || 'scheduled';
 if (swapAggregator) autovoterConfig.swapAggregator = swapAggregator;
         if (slippageLimitPercent) autovoterConfig.slippageLimitPercent = parseFloat(slippageLimitPercent);
+		 autovoterConfig.blacklistedPools = Array.isArray(blacklistedPools)
+            ? blacklistedPools.map(addr => addr.toLowerCase())
+            : [];
         saveCurrentSettings(); 
         
         ws.send(JSON.stringify({ 
@@ -1822,7 +1829,9 @@ async function fetchData(specificPoolAddresses = null) {
                             } else {
                                 poolAddress = await localVoterContract.pools(poolListToProcess[j]);
                             }
-
+if (autovoterConfig.blacklistedPools && autovoterConfig.blacklistedPools.includes(poolAddress.toLowerCase())) {
+                    return null; 
+                }
                             const gaugeAddress = await localVoterContract.gauges(poolAddress);
                             if (gaugeAddress === ethers.ZeroAddress) return null;
                             
